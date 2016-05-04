@@ -304,11 +304,22 @@ AhoySipCall.prototype.reject = function(reason) {
 
 AhoySipCall.prototype.terminate = function() {
   var self = this;
-  var response = {
-    sessionTerminate: {
-      uuid: self.uuid
-    }
-  };
+  var response = null;
+  if (self.isAnswered) {
+    response = {
+      sessionTerminate: {
+        uuid: self.uuid
+      }
+    };
+  } else if (self.isOutgoing) {
+    response = {
+      sessionCancel: {
+        uuid: self.uuid
+      }
+    };
+  } else {
+    return self.reject();
+  }
   self.client.sendWebRtcResponse(response);
   self.destroy();
 }
