@@ -41,8 +41,11 @@ AhoySipRegistration.prototype.register = function() {
   });
 }
 
-AhoySipRegistration.prototype.call = function(calledParty, callingParty, timeout, localStream, remoteMedia, delegate) {
+AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia, delegate) {
   var self = this;
+  var calledParty = options.calledParty;
+  var callingParty = options.callingParty;
+  var timeout = options.timeout;
   if (typeof calledParty === 'string') {
     calledParty = { number: calledParty };
   }
