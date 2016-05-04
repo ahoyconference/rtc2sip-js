@@ -1,0 +1,20 @@
+{
+  "name": "rtc2sip-js",
+  "private": false,
+  "version": "0.0.1",
+  "description": "AhoyRTC rtc2sip vanilla JavaScript client library",
+  "repository": "https://github.com/ahoyconference/rtc2sip-js",
+  "license": "MIT",
+  "devDependencies": {
+    "grunt": "~0.4.2",
+    "grunt-contrib-concat": "*",
+    "grunt-contrib-uglify": "^1.0.1",
+    "grunt-obfuscator-redux": "^1.0.3",
+    "http-server": "^0.6.1",
+    "shelljs": "^0.2.6"
+  },
+  "scripts": {
+    "prestart": "npm install",
+    "start": "grunt"
+  }
+}
