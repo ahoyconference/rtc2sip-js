@@ -55,6 +55,7 @@ AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia,
     callingParty = { number: callingParty };
   }
   var callOptions = {
+    audioCodec: options.audioCodec,
     calledParty: calledParty,
     callingParty: callingParty,
     timeout: timeout
