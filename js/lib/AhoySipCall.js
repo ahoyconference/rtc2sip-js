@@ -411,12 +411,17 @@ AhoySipCall.prototype.terminate = function() {
   self.destroy();
 }
 
-AhoySipCall.prototype.answer = function(stream, remoteMedia) {
+AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
   var self = this;
   if (self.isAnswered) return;
   self.localStream = stream;
   self.remoteMedia = remoteMedia;
   self.isAnswered = true;
+  if (options.audioCodec !== undefined) {
+    self.audioCodec = options.audioCodec.toLowerCase();
+  }  else {
+    self.audioCodec = null;
+  }
 
   self.pc = new RTCPeerConnection(self.pc_config);
   if (self.localStream) {
