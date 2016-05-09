@@ -43,6 +43,7 @@ After successfully initializing rtc2sip get access to the microphone (make sure 
               }
             };
             var options = {
+              audioCodec: "opus/48000/2",
               calledParty: "666",
               callingParty: "1234",
               timeout: 60,
@@ -142,7 +143,7 @@ After successfully initializing rtc2sip get access to the microphone (make sure 
                 call.acknowledge();
                 // answer after 3 seconds
                 setTimeout(function() {
-                  call.answer(stream, remoteMedia);
+                  call.answer({ audioCodec: "opus/48000/2" }, stream, remoteMedia);
                 }, 3000);
 
               },
