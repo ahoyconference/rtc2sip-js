@@ -240,6 +240,7 @@ var RTC2SIP = RTC2SIP || {
       callingParty = { number: callingParty };
     }
     var callOptions = {
+      audioCodec: options.audioCodec,
       sip: options.sip,
       calledParty: calledParty,
       callingParty: callingParty,

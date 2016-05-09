@@ -1085,6 +1085,11 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.client = client;
   self.delegate = delegate;
   self.uuid = uuid || 'call-' + Date.now();
+  if (options.audioCodec !== undefined) {
+    self.audioCodec = options.audioCodec.toLowerCase();
+  }  else {
+    self.audioCodec = null;
+  }
   self.isOutgoing = false;
   self.isAnswered = false;
 }
@@ -1110,6 +1115,82 @@ AhoySipCall.prototype.destroy = function() {
   self.remoteStrea = null;
   self.delegate = null;
   self.uuid = null;
+}
+
+function AhoySdpForceAudioCodec(sdp, audioCodec) {
+    var lines = sdp.split('\r\n');
+    var payloadType = null;
+    var extraPayloadTypes = [];
+    var output = [];
+
+    function getPayloadType(line) {
+      var pt = null;
+      var tmp = line.split(' ');
+      if (tmp && tmp.length) {
+        tmp = tmp[0].split(':');
+        if (tmp && (tmp.length > 1)) {
+          pt = tmp[1];
+        }
+      }
+      return pt;
+    }
+
+    function getPayloadMimeType(line) {
+      var tmp = line.split(' ');
+      if (tmp && tmp.length) {
+        return tmp[1].toLowerCase();
+      }
+      return null;
+    }
+
+    lines.forEach(function(line) {
+      if ((line.toLowerCase().indexOf('a=rtpmap:') !== -1)) {
+        if (line.toLowerCase().indexOf(audioCodec) !== -1) {
+          payloadType = getPayloadType(line);
+        } else if (getPayloadMimeType(line) === 'telephone-event/8000') {
+          extraPayloadTypes.push(getPayloadType(line));
+        }
+      }
+    });
+    if (!payloadType) {
+      console.log('AhoySdpForceAudioCodec: cannot force audioCodec ' + audioCodec + ' because it is not contained in the SDP');
+      return sdp;
+    }
+    var parsingAudio = false;
+    lines.forEach(function(line) {
+      if (line.indexOf('m=audio') !== -1) {
+        parsingAudio = true;
+        var tmp = line.split(' ');
+        if (tmp && (tmp.length > 3)) {
+          var mline = tmp[0] + ' ' + tmp[1] + ' ' + tmp[2] + ' ' + payloadType;
+          if (extraPayloadTypes.length) {
+            mline += ' ' + extraPayloadTypes.join(' ');
+          }
+          output.push(mline);
+        } else {
+          output.push(line);
+        }
+      } else if (line.indexOf('m=') !== -1) {
+        parsingAudio = false;
+        output.push(line);
+      } else {
+        if (parsingAudio) {
+          if ((line.indexOf('a=rtpmap:') !== -1) && (getPayloadType(line) !== payloadType) ) {
+            if (getPayloadMimeType(line) === 'telephone-event/8000') {
+              extraPayloadTypes.push(getPayloadType(line));
+              output.push(line);
+            }
+          } else if ((line.indexOf('a=fmtp:') !== -1) && (getPayloadType(line) !== payloadType) ) {
+          } else if ((line.indexOf('a=rtcp-fb:') !== -1) && (getPayloadType(line) !== payloadType) ) {
+          } else {
+            output.push(line);
+          }
+        } else {
+          output.push(line);
+        }
+      }
+    });
+    return output.join('\r\n');
 }
 
 AhoySipCall.prototype.handleWebRtc = function(msg) {
@@ -1194,6 +1275,9 @@ AhoySipCall.prototype.handleWebRtc = function(msg) {
           function setRemoteSuccess() {
             self.pc.createAnswer(
         	function createAnswerSuccess(description) {
+        	  if (self.audioCodec) {
+        	    description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+        	  }
         	  self.pc.setLocalDescription(
         	    description,
         	    function setLocalSuccess() {
@@ -1320,6 +1404,9 @@ AhoySipCall.prototype.startCall = function() {
 
   self.pc.createOffer(
     function createOfferSucces(description) {
+      if (self.audioCodec) {
+        description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+      }
       self.pc.setLocalDescription(
         description,
         function setLocalSuccess() {
@@ -1373,11 +1460,22 @@ AhoySipCall.prototype.reject = function(reason) {
 
 AhoySipCall.prototype.terminate = function() {
   var self = this;
-  var response = {
-    sessionTerminate: {
-      uuid: self.uuid
-    }
-  };
+  var response = null;
+  if (self.isAnswered) {
+    response = {
+      sessionTerminate: {
+        uuid: self.uuid
+      }
+    };
+  } else if (self.isOutgoing) {
+    response = {
+      sessionCancel: {
+        uuid: self.uuid
+      }
+    };
+  } else {
+    return self.reject();
+  }
   self.client.sendWebRtcResponse(response);
   self.destroy();
 }
@@ -1427,6 +1525,9 @@ AhoySipCall.prototype.answer = function(stream, remoteMedia) {
         self.remoteDescription = null;
         self.pc.createAnswer(
           function createAnswerSuccess(description) {
+            if (self.audioCodec) {
+              description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+            }
             self.localDescription = description;
             self.pc.setLocalDescription(
               self.localDescription,
@@ -1503,8 +1604,11 @@ AhoySipRegistration.prototype.register = function() {
   });
 }
 
-AhoySipRegistration.prototype.call = function(calledParty, callingParty, timeout, localStream, remoteMedia, delegate) {
+AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia, delegate) {
   var self = this;
+  var calledParty = options.calledParty;
+  var callingParty = options.callingParty;
+  var timeout = options.timeout;
   if (typeof calledParty === 'string') {
     calledParty = { number: calledParty };
   }
@@ -1768,6 +1872,7 @@ var RTC2SIP = RTC2SIP || {
       callingParty = { number: callingParty };
     }
     var callOptions = {
+      audioCodec: options.audioCodec,
       sip: options.sip,
       calledParty: calledParty,
       callingParty: callingParty,
