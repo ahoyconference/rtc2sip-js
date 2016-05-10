@@ -128,7 +128,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg) {
   var self = this;
     if (msg.sessionReject) {
       if (self.delegate.callFailed) {
-        self.delegate.callFailed(self, error)
+        self.delegate.callFailed(self, msg.sessionReject.reason)
       }
       self.destroy();
     } else if (msg.sessionAcknowledge) {
