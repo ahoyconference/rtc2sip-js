@@ -1,20 +1,25 @@
 var RTC2SIP = RTC2SIP || {
   errorCallback: null,
   ws: null,
+  generateUuid: function() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {var r = Math.random()*16|0,v=c=='x'?r:r&0x3|0x8;return v.toString(16);});
+  },
   send: function(msg) {
     var self = this;
     if (self.ws) {
       self.ws.send(JSON.stringify(msg));
     }
   },
-  sendMessage: function(msg) {
+  sendMessage: function(msg, destination) {
     var self = this;
+    var messageRequest = {
+      message: msg,
+      to: destination,
+      uuid: self.generateUuid()
+    };
     self.send(
       {
-        messageRequest: {
-	  message: msg,
-	  uuid: "msg-" + Date.now()
-	}
+        messageRequest: messageRequest
       }
     );
   },
@@ -23,22 +28,24 @@ var RTC2SIP = RTC2SIP || {
   requestCallbacks: {},
   sipRegistrations: {},
   calls: {},
-  sendRequest: function(request, uuid, requestCallback) {
+  sendRequest: function(request, uuid, destination, requestCallback) {
     var self = this;
-    self.requestCallbacks[uuid] = requestCallback;
-    self.sendMessage(request);
+    if (requestCallback) {
+      self.requestCallbacks[uuid] = requestCallback;
+    }
+    self.sendMessage(request, destination);
   },
   sendSipRequest: function(request, uuid, callback) {
     var self = this;
-    self.sendRequest( { sip: request }, uuid, callback );
+    self.sendRequest( { sip: request }, uuid, null, callback );
   },
-  sendWebRtcRequest: function(request, uuid, callback) {
+  sendWebRtcRequest: function(request, uuid, destination) {
     var self = this;
-    self.sendRequest( { webrtc: request }, uuid, callback );
+    self.sendRequest( { webrtc: request }, uuid, destination);
   },
-  sendWebRtcResponse: function(response) {
+  sendWebRtcResponse: function(response, destination) {
     var self = this;
-    self.sendMessage( { webrtc: response } );
+    self.sendMessage( { webrtc: response }, destination );
   },
   handleSip: function(msg) {
     var self = this;
@@ -56,7 +63,7 @@ var RTC2SIP = RTC2SIP || {
       console.log("no callback for " + JSON.stringify(msg));
     }
   },
-  handleWebRtc: function(msg) {
+  handleWebRtc: function(msg, from) {
     var self = this;
     var registrationId = null;
     var uuid = null;
@@ -102,7 +109,7 @@ var RTC2SIP = RTC2SIP || {
       if (messageType === 'sessionOffer') {
         var failed = true;
         var activeCalls = Object.keys(self.calls).length;
-        if ((activeCalls == 0) || self.isCallWaitingEnabled) {
+        if ((activeCalls == 0) || self.isCallWaitingEnabled || msg.sessionOffer.replacesUuid) {
           if (msg.sessionOffer.sip && msg.sessionOffer.sip.registrationId) {
             registrationId = msg.sessionOffer.sip.registrationId;
             if (registrationId) {
@@ -125,6 +132,8 @@ var RTC2SIP = RTC2SIP || {
                 if (registration) {
                   console.log("incoing SIP call for registration " + registration.id);
                   var callOptions = {
+                    peerAddress: from,
+                    sip: msg.sessionOffer.sip,
                     calledParty: {
                       number: calledPartyNumber
                     },
@@ -137,28 +146,58 @@ var RTC2SIP = RTC2SIP || {
 	          if (sdp) {
 	            call.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
 	          }
-    	          registration.delegate.callReceived(call);
     	          self.calls[call.uuid] = call;
+    	          registration.delegate.callReceived(call);
     	          failed = false;
                 }
               }
             }
+          } else if (msg.sessionOffer.replacesUuid) {
+            var call = self.calls[msg.sessionOffer.replacesUuid];
+            if (call) {
+              var localStream = call.localStream;
+              var remoteMedia = call.remoteMedia;
+              var delegate = call.delegate;
+              call.terminate();
+              var callOptions = {
+                peerAddress: from
+              }
+              call = new AhoySipCall(uuid, callOptions, null, null, self, delegate);
+	      if (sdp) {
+		call.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
+	      }
+	      if (msg.sessionOffer.candidates) {
+	        var remoteIceCandidates = msg.sessionOffer.candidates;
+	        if (remoteIceCandidates && remoteIceCandidates.length) {
+	          remoteIceCandidates.forEach(function(candidateDict) {
+                    try {
+                      var candidate = new RTCIceCandidate(candidateDict);
+                      call.remoteIceCandidates.push(candidate);
+                    } catch (error) {
+                    }
+	          });
+	        }
+	      }
+    	      self.calls[call.uuid] = call;
+	      call.directAnswer({}, localStream, remoteMedia);
+              failed = false;
+            }
           }
         }
         if (failed) {
-          self.sendWebRtcResponse( { sessionReject: { uuid: uuid, reason: "busy" } } );
+          self.sendWebRtcResponse( { sessionReject: { uuid: uuid, reason: "busy" } }, from);
         }
       } else {
         return;
       }
     } else {
-      call.handleWebRtc(msg);
+      call.handleWebRtc(msg, from);
     }
   },
   handleMessageEvent: function(event) {
     var self = this;
     if (event.message.webrtc) {
-      self.handleWebRtc(event.message.webrtc);
+      self.handleWebRtc(event.message.webrtc, event.from);
     }
     if (event.message.sip) {
       self.handleSip(event.message.sip);
@@ -179,7 +218,7 @@ var RTC2SIP = RTC2SIP || {
         self.send(
           {
             identityRequest: {
-    	      uuid: 'id-' + Date.now()
+    	      uuid: self.generateUuid()
             }
           }
         );
@@ -240,6 +279,7 @@ var RTC2SIP = RTC2SIP || {
       callingParty = { number: callingParty };
     }
     var callOptions = {
+      peerAddress: options.peerAddress,
       audioCodec: options.audioCodec,
       sip: options.sip,
       calledParty: calledParty,

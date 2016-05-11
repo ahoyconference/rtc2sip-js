@@ -19,7 +19,7 @@ function AhoySipRegistration(options, client, delegate, callback) {
 
 AhoySipRegistration.prototype.register = function() {
   var self = this;
-  var uuid = 'id-' + Date.now();
+  var uuid = self.client.generateUuid();
   var request = {
     registerRequest: {
       registrar: self.registrar,

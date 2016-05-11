@@ -1082,13 +1082,19 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.remoteStream = null;
   self.remoteMedia = remoteMedia;
   self.remoteDescription = null;
+  self.remoteIceCandidates = [];
   self.client = client;
   self.delegate = delegate;
-  self.uuid = uuid || 'call-' + Date.now();
+  self.uuid = uuid || client.generateUuid();
   if (options.audioCodec !== undefined) {
     self.audioCodec = options.audioCodec.toLowerCase();
   }  else {
     self.audioCodec = null;
+  }
+  if (options.peerAddress !== undefined) {
+    self.peerAddress = options.peerAddress;
+  } else {
+    self.peerAddress = null;
   }
   self.isOutgoing = false;
   self.isAnswered = false;
@@ -1193,7 +1199,7 @@ function AhoySdpForceAudioCodec(sdp, audioCodec) {
     return output.join('\r\n');
 }
 
-AhoySipCall.prototype.handleWebRtc = function(msg) {
+AhoySipCall.prototype.handleWebRtc = function(msg, from) {
   var self = this;
     if (msg.sessionReject) {
       if (self.delegate.callFailed) {
@@ -1242,11 +1248,28 @@ AhoySipCall.prototype.handleWebRtc = function(msg) {
       }
     } else if (msg.sessionAnswer) {
       self.isAnswered = true;
+      if (msg.sessionAnswer.candidates) {
+	var remoteIceCandidates = msg.sessionAnswer.candidates;
+	if (remoteIceCandidates && remoteIceCandidates.length) {
+	  remoteIceCandidates.forEach(function(candidateDict) {
+            try {
+              var candidate = new RTCIceCandidate(candidateDict);
+              call.remoteIceCandidates.push(candidate);
+            } catch (error) { 
+            }
+	  });
+	}
+      }
+
       if (msg.sessionAnswer.sdp) {
         self.remoteDescription = new RTCSessionDescription({ type: "answer", sdp: msg.sessionAnswer.sdp });
         self.pc.setRemoteDescription(
           self.remoteDescription,
           function setRemoteSuccess() {
+            self.remoteIceCandidates.forEach(function(candidate) {
+              self.pc.addIceCandidate(candidate);
+            });
+            self.remoteIceCandidates = [];
             if (!self.isAnswered && self.delegate.callAnswered) {
               self.delegate.callAnswered(self);
             }
@@ -1281,7 +1304,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg) {
         	  self.pc.setLocalDescription(
         	    description,
         	    function setLocalSuccess() {
-        	      self.localDescription = localDescription;
+        	      self.localDescription = description;
         	      self.sendSessionAnswer();
         	    },
         	    function setLocalError(error) {
@@ -1337,23 +1360,22 @@ AhoySipCall.prototype.sendSessionOffer = function() {
     }
   };
 
-  self.client.sendWebRtcRequest(request, self.uuid, function(msg) {
-    sip.password = null;
-    self.sip.password = null;
-    self.handleWebRtcMessage(msg);
-  });
+  self.client.sendWebRtcRequest(request, self.uuid, self.peerAddress);
+  sip.password = null;
+  self.sip.password = null;
 }
 
-AhoySipCall.prototype.sendSessionAnswer = function() {
+AhoySipCall.prototype.sendSessionAnswer = function(candidates) {
   var self = this;
   var response = {
     sessionAnswer: {
       sdp: self.localDescription.sdp,
+      candidates: candidates,
       uuid: self.uuid
     }
   };
 
-  self.client.sendWebRtcResponse(response);
+  self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
 AhoySipCall.prototype.startCall = function() {
@@ -1442,7 +1464,7 @@ AhoySipCall.prototype.acknowledge = function() {
     }
   };
 
-  self.client.sendWebRtcResponse(response);
+  self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
 AhoySipCall.prototype.reject = function(reason) {
@@ -1454,7 +1476,7 @@ AhoySipCall.prototype.reject = function(reason) {
     }
   };
 
-  self.client.sendWebRtcResponse(response);
+  self.client.sendWebRtcResponse(response, self.peerAddress);
   self.destroy();
 }
 
@@ -1476,11 +1498,133 @@ AhoySipCall.prototype.terminate = function() {
   } else {
     return self.reject();
   }
-  self.client.sendWebRtcResponse(response);
+  self.client.sendWebRtcResponse(response, self.peerAddress);
   self.destroy();
 }
 
-AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
+AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAhoyId) {
+  var self = this;
+  var tmp = xAhoyId.split("@");
+  if (!tmp || (tmp.length != 2)) {
+    console.log("cannot directConnect with xAhoyId: " + xAhoyId);
+    return self.answer(options, stream, remoteMedia);
+  }
+  self.client.removeCall(self.uuid);
+  self.destroyPeerConnection();
+  var peerUuid = tmp[0];
+  self.peerAddress = tmp[1];
+  self.uuid = self.client.generateUuid();
+  self.client.addCall(self.uuid, self);
+
+  self.localStream = stream;
+  self.remoteMedia = remoteMedia;
+
+  if (options.audioCodec !== undefined) {
+    self.audioCodec = options.audioCodec.toLowerCase();
+  }  else {
+    self.audioCodec = null;
+  }
+  self.isOutgoing = true;
+
+  if (self.turn && self.turn.urls) {
+    var iceServers = [];
+    self.turn.urls.forEach(function(url) {
+      iceServers.push( { url: url, urls: url, username: self.turn.username, credential: self.turn.credential} );
+    });
+    if (iceServers.length > 0) {
+      self.pc_config = {
+        "iceServers": iceServers
+      };
+    }
+  }
+  self.pc = new RTCPeerConnection(self.pc_config);
+  if (self.localStream) {
+    self.pc.addStream(self.localStream);
+  }
+  self.pc.oniceconnectionstatechange = function(event) {
+    var state = event;
+    if (event.target && event.target.iceConnectionState) {
+      state = event.target.iceConnectionState;
+    }
+    console.log("iceConnectionState: " + state);
+    if (state === "connected") {
+      if (self.delegate.establishedConnection) {
+        self.delegate.establishedConnection(self);
+      }
+    } else if (state === "failed") {
+      if (self.call.delegate.callFailed) {
+        self.delegate.callFailed(self, "establishing secure connecton failed");
+      }
+      self.terminate();
+    } else if ((state === "disconnected") || (state === "closed")) {
+      if (self.delegate.callTerminated) {
+        self.delegate.callTerminated(self);
+      }
+      self.terminate();
+    }
+  }
+  self.pc.onaddstream = function(event) {
+    self.remoteStream = event.stream;
+    attachMediaStream(self.remoteMedia, self.remoteStream);
+  }
+
+  var candidates = [];
+  self.pc.onicecandidate = function(event) {
+    if (event && event.candidate && event.candidate.candidate) {
+      var candidate = event.candidate;
+      var candidateDict = {
+	candidate: candidate.candidate,
+      };
+      if (candidate.sdpMid != undefined) {
+	candidateDict.sdpMid = candidate.sdpMid;
+      }
+      if (candidate.sdpMLineIndex != undefined) {
+        candidateDict.sdpMLineIndex = candidate.sdpMLineIndex;
+      }
+      candidates.push(candidateDict);
+    } else {
+      if (self.localDescription) {
+	var request = {
+	  sessionOffer: {
+    	    sdp: self.localDescription.sdp,
+    	    candidates: candidates,
+    	    uuid: self.uuid,
+    	    replacesUuid: peerUuid
+	  }
+	};
+	self.client.sendWebRtcRequest(request, self.uuid, self.peerAddress);
+      }
+    }
+  }
+
+  self.pc.createOffer(
+    function createOfferSucces(description) {
+      if (self.audioCodec) {
+        description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+      }
+      self.pc.setLocalDescription(
+        description,
+        function setLocalSuccess() {
+          self.localDescription = description;
+        },
+        function setLocalError(error) {
+          if (self.delegate.callFailed) {
+            self.delegate.callFailed(self, error);
+          }
+        }
+      );
+    },
+    function createOfferError(error) {
+      if (self.delegate.callFailed) {
+        self.delegate.callFailed(self, error);
+      }
+    }
+  );
+
+
+}
+
+AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
   var self = this;
   if (self.isAnswered) return;
   self.localStream = stream;
@@ -1491,6 +1635,145 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
   }  else {
     self.audioCodec = null;
   }
+
+  if (self.turn && self.turn.urls) {
+    var iceServers = [];
+    self.turn.urls.forEach(function(url) {
+      iceServers.push( { url: url, urls: url, username: self.turn.username, credential: self.turn.credential} );
+    });
+    if (iceServers.length > 0) {
+      self.pc_config = {
+        "iceServers": iceServers
+      };
+    }
+  }
+  self.pc = new RTCPeerConnection(self.pc_config);
+
+  self.pc = new RTCPeerConnection(self.pc_config);
+  if (self.localStream) {
+    self.pc.addStream(self.localStream);
+  }
+  self.pc.oniceconnectionstatechange = function(event) {
+    var state = event;
+    if (event.target && event.target.iceConnectionState) {
+      state = event.target.iceConnectionState;
+    }
+    console.log("iceConnectionState: " + state);
+    if (state === "connected") {
+      if (self.delegate.establishedConnection) {
+        self.delegate.establishedConnection(self);
+      }
+    } else if (state === "failed") {
+      if (self.call.delegate.callFailed) {
+        self.delegate.callFailed(self, "establishing secure connecton failed");
+      }
+      self.terminate();
+    } else if ((state === "disconnected") || (state === "closed")) {
+      if (self.delegate.callTerminated) {
+        self.delegate.callTerminated(self);
+      }
+      self.terminate();
+    }
+  }
+  var candidates = [];
+  self.pc.onicecandidate = function(event) {
+    if (event && event.candidate && event.candidate.candidate) {
+      var candidate = event.candidate;
+      var candidateDict = {
+	candidate: candidate.candidate,
+      };
+      if (candidate.sdpMid != undefined) {
+	candidateDict.sdpMid = candidate.sdpMid;
+      }
+      if (candidate.sdpMLineIndex != undefined) {
+        candidateDict.sdpMLineIndex = candidate.sdpMLineIndex;
+      }
+      candidates.push(candidateDict);
+    } else {
+      if (self.localDescription) {
+        self.sendSessionAnswer(candidates);
+      }
+    }
+  }
+
+  self.pc.onaddstream = function(event) {
+    self.remoteStream = event.stream;
+    attachMediaStream(self.remoteMedia, self.remoteStream);
+  }
+
+  if (self.remoteDescription) {
+    self.pc.setRemoteDescription(
+      self.remoteDescription,
+      function setRemoteSuccess() {
+        self.remoteDescription = null;
+        self.remoteIceCandidates.forEach(function(candidate) {
+          self.pc.addIceCandidate(candidate);
+        });
+        self.remoteIceCandidates = [];
+        self.pc.createAnswer(
+          function createAnswerSuccess(description) {
+            if (self.audioCodec) {
+              description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+            }
+            self.pc.setLocalDescription(
+              description,
+              function setLocalSuccess() {
+                self.localDescription = description;
+              },
+              function setLocalError(error) {
+                if (self.delegate.callFailed) {
+                  self.delegate.callFailed(self, error);
+                }
+                self.reject();
+              }
+            );
+          },
+          function createAnswerError(error) {
+            console.log(error);
+            if (self.delegate.callFailed) {
+              self.delegate.callFailed(self, error);
+            }
+            self.reject("error");
+          }
+        );
+      },
+      function setRemoteError(error) {
+        if (self.delegate.callFailed) {
+          self.delegate.callFailed(self, error);
+        }
+        self.reject("error");
+      }
+    );
+  }
+}
+
+AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
+  var self = this;
+  if (self.isAnswered) return;
+  if ((options.p2p === true) && self.sip.xAhoyId) {
+    return self.directConnect(options, stream, remoteMedia, self.sip.xAhoyId)
+  }
+  self.localStream = stream;
+  self.remoteMedia = remoteMedia;
+  self.isAnswered = true;
+  if (options.audioCodec !== undefined) {
+    self.audioCodec = options.audioCodec.toLowerCase();
+  }  else {
+    self.audioCodec = null;
+  }
+
+  if (self.turn && self.turn.urls) {
+    var iceServers = [];
+    self.turn.urls.forEach(function(url) {
+      iceServers.push( { url: url, urls: url, username: self.turn.username, credential: self.turn.credential} );
+    });
+    if (iceServers.length > 0) {
+      self.pc_config = {
+        "iceServers": iceServers
+      };
+    }
+  }
+  self.pc = new RTCPeerConnection(self.pc_config);
 
   self.pc = new RTCPeerConnection(self.pc_config);
   if (self.localStream) {
@@ -1533,10 +1816,10 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
             if (self.audioCodec) {
               description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
             }
-            self.localDescription = description;
             self.pc.setLocalDescription(
-              self.localDescription,
+              description,
               function setLocalSuccess() {
+                self.localDescription = description;
                 self.sendSessionAnswer();
               },
               function setLocalError(error) {
@@ -1587,7 +1870,7 @@ function AhoySipRegistration(options, client, delegate, callback) {
 
 AhoySipRegistration.prototype.register = function() {
   var self = this;
-  var uuid = 'id-' + Date.now();
+  var uuid = self.client.generateUuid();
   var request = {
     registerRequest: {
       registrar: self.registrar,
@@ -1639,20 +1922,25 @@ AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia,
 var RTC2SIP = RTC2SIP || {
   errorCallback: null,
   ws: null,
+  generateUuid: function() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {var r = Math.random()*16|0,v=c=='x'?r:r&0x3|0x8;return v.toString(16);});
+  },
   send: function(msg) {
     var self = this;
     if (self.ws) {
       self.ws.send(JSON.stringify(msg));
     }
   },
-  sendMessage: function(msg) {
+  sendMessage: function(msg, destination) {
     var self = this;
+    var messageRequest = {
+      message: msg,
+      to: destination,
+      uuid: self.generateUuid()
+    };
     self.send(
       {
-        messageRequest: {
-	  message: msg,
-	  uuid: "msg-" + Date.now()
-	}
+        messageRequest: messageRequest
       }
     );
   },
@@ -1661,22 +1949,24 @@ var RTC2SIP = RTC2SIP || {
   requestCallbacks: {},
   sipRegistrations: {},
   calls: {},
-  sendRequest: function(request, uuid, requestCallback) {
+  sendRequest: function(request, uuid, destination, requestCallback) {
     var self = this;
-    self.requestCallbacks[uuid] = requestCallback;
-    self.sendMessage(request);
+    if (requestCallback) {
+      self.requestCallbacks[uuid] = requestCallback;
+    }
+    self.sendMessage(request, destination);
   },
   sendSipRequest: function(request, uuid, callback) {
     var self = this;
-    self.sendRequest( { sip: request }, uuid, callback );
+    self.sendRequest( { sip: request }, uuid, null, callback );
   },
-  sendWebRtcRequest: function(request, uuid, callback) {
+  sendWebRtcRequest: function(request, uuid, destination) {
     var self = this;
-    self.sendRequest( { webrtc: request }, uuid, callback );
+    self.sendRequest( { webrtc: request }, uuid, destination);
   },
-  sendWebRtcResponse: function(response) {
+  sendWebRtcResponse: function(response, destination) {
     var self = this;
-    self.sendMessage( { webrtc: response } );
+    self.sendMessage( { webrtc: response }, destination );
   },
   handleSip: function(msg) {
     var self = this;
@@ -1694,7 +1984,7 @@ var RTC2SIP = RTC2SIP || {
       console.log("no callback for " + JSON.stringify(msg));
     }
   },
-  handleWebRtc: function(msg) {
+  handleWebRtc: function(msg, from) {
     var self = this;
     var registrationId = null;
     var uuid = null;
@@ -1740,7 +2030,7 @@ var RTC2SIP = RTC2SIP || {
       if (messageType === 'sessionOffer') {
         var failed = true;
         var activeCalls = Object.keys(self.calls).length;
-        if ((activeCalls == 0) || self.isCallWaitingEnabled) {
+        if ((activeCalls == 0) || self.isCallWaitingEnabled || msg.sessionOffer.replacesUuid) {
           if (msg.sessionOffer.sip && msg.sessionOffer.sip.registrationId) {
             registrationId = msg.sessionOffer.sip.registrationId;
             if (registrationId) {
@@ -1763,6 +2053,8 @@ var RTC2SIP = RTC2SIP || {
                 if (registration) {
                   console.log("incoing SIP call for registration " + registration.id);
                   var callOptions = {
+                    peerAddress: from,
+                    sip: msg.sessionOffer.sip,
                     calledParty: {
                       number: calledPartyNumber
                     },
@@ -1775,28 +2067,58 @@ var RTC2SIP = RTC2SIP || {
 	          if (sdp) {
 	            call.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
 	          }
-    	          registration.delegate.callReceived(call);
     	          self.calls[call.uuid] = call;
+    	          registration.delegate.callReceived(call);
     	          failed = false;
                 }
               }
             }
+          } else if (msg.sessionOffer.replacesUuid) {
+            var call = self.calls[msg.sessionOffer.replacesUuid];
+            if (call) {
+              var localStream = call.localStream;
+              var remoteMedia = call.remoteMedia;
+              var delegate = call.delegate;
+              call.terminate();
+              var callOptions = {
+                peerAddress: from
+              }
+              call = new AhoySipCall(uuid, callOptions, null, null, self, delegate);
+	      if (sdp) {
+		call.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
+	      }
+	      if (msg.sessionOffer.candidates) {
+	        var remoteIceCandidates = msg.sessionOffer.candidates;
+	        if (remoteIceCandidates && remoteIceCandidates.length) {
+	          remoteIceCandidates.forEach(function(candidateDict) {
+                    try {
+                      var candidate = new RTCIceCandidate(candidateDict);
+                      call.remoteIceCandidates.push(candidate);
+                    } catch (error) {
+                    }
+	          });
+	        }
+	      }
+    	      self.calls[call.uuid] = call;
+	      call.directAnswer({}, localStream, remoteMedia);
+              failed = false;
+            }
           }
         }
         if (failed) {
-          self.sendWebRtcResponse( { sessionReject: { uuid: uuid, reason: "busy" } } );
+          self.sendWebRtcResponse( { sessionReject: { uuid: uuid, reason: "busy" } }, from);
         }
       } else {
         return;
       }
     } else {
-      call.handleWebRtc(msg);
+      call.handleWebRtc(msg, from);
     }
   },
   handleMessageEvent: function(event) {
     var self = this;
     if (event.message.webrtc) {
-      self.handleWebRtc(event.message.webrtc);
+      self.handleWebRtc(event.message.webrtc, event.from);
     }
     if (event.message.sip) {
       self.handleSip(event.message.sip);
@@ -1817,7 +2139,7 @@ var RTC2SIP = RTC2SIP || {
         self.send(
           {
             identityRequest: {
-    	      uuid: 'id-' + Date.now()
+    	      uuid: self.generateUuid()
             }
           }
         );
@@ -1878,6 +2200,7 @@ var RTC2SIP = RTC2SIP || {
       callingParty = { number: callingParty };
     }
     var callOptions = {
+      peerAddress: options.peerAddress,
       audioCodec: options.audioCodec,
       sip: options.sip,
       calledParty: calledParty,
