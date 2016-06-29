@@ -49,7 +49,7 @@ AhoySipCall.prototype.destroy = function() {
   self.client.removeCall(self.uuid);
   self.sip = null;
   self.localStream = null;
-  self.remoteStrea = null;
+  self.remoteStream = null;
   self.delegate = null;
   self.uuid = null;
 }

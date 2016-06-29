@@ -1118,7 +1118,7 @@ AhoySipCall.prototype.destroy = function() {
   self.client.removeCall(self.uuid);
   self.sip = null;
   self.localStream = null;
-  self.remoteStrea = null;
+  self.remoteStream = null;
   self.delegate = null;
   self.uuid = null;
 }
@@ -1892,6 +1892,25 @@ AhoySipRegistration.prototype.register = function() {
   });
 }
 
+AhoySipRegistration.prototype.unregister = function() {
+  var self = this;
+  var uuid = self.client.generateUuid();
+  var request = {
+    unregisterRequest: {
+      registrationId: self.id,
+      uuid: uuid
+    }
+  };
+  self.client.sendSipRequest(request, uuid, function(response) {
+    self.client.removeSipRegistration(self.id);
+    if (!response || !response.registration) {
+      self.callback("error", self);
+    } else {
+      self.callback(response.error, self);
+    }
+  });
+}
+
 AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia, delegate) {
   var self = this;
   var calledParty = options.calledParty;
@@ -2051,7 +2070,7 @@ var RTC2SIP = RTC2SIP || {
                 }
                 var registration = self.sipRegistrations[registrationId];
                 if (registration) {
-                  console.log("incoing SIP call for registration " + registration.id);
+                  console.log("incoming SIP call for registration " + registration.id);
                   var callOptions = {
                     peerAddress: from,
                     sip: msg.sessionOffer.sip,
@@ -2221,6 +2240,10 @@ var RTC2SIP = RTC2SIP || {
   removeCall: function(uuid) {
     var self = this;
     delete self.calls[uuid];
+  },
+  removeSipRegistration: function(id) {
+    var self = this;
+    delete self.sipRegistrationsid[id];
   },
   stopMediaStream: function(stream) {
     if (!stream) return;

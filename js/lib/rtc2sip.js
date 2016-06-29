@@ -130,7 +130,7 @@ var RTC2SIP = RTC2SIP || {
                 }
                 var registration = self.sipRegistrations[registrationId];
                 if (registration) {
-                  console.log("incoing SIP call for registration " + registration.id);
+                  console.log("incoming SIP call for registration " + registration.id);
                   var callOptions = {
                     peerAddress: from,
                     sip: msg.sessionOffer.sip,
@@ -300,6 +300,10 @@ var RTC2SIP = RTC2SIP || {
   removeCall: function(uuid) {
     var self = this;
     delete self.calls[uuid];
+  },
+  removeSipRegistration: function(id) {
+    var self = this;
+    delete self.sipRegistrationsid[id];
   },
   stopMediaStream: function(stream) {
     if (!stream) return;

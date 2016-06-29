@@ -41,6 +41,25 @@ AhoySipRegistration.prototype.register = function() {
   });
 }
 
+AhoySipRegistration.prototype.unregister = function() {
+  var self = this;
+  var uuid = self.client.generateUuid();
+  var request = {
+    unregisterRequest: {
+      registrationId: self.id,
+      uuid: uuid
+    }
+  };
+  self.client.sendSipRequest(request, uuid, function(response) {
+    self.client.removeSipRegistration(self.id);
+    if (!response || !response.registration) {
+      self.callback("error", self);
+    } else {
+      self.callback(response.error, self);
+    }
+  });
+}
+
 AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia, delegate) {
   var self = this;
   var calledParty = options.calledParty;
