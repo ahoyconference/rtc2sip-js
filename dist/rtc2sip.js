@@ -1096,6 +1096,11 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   } else {
     self.peerAddress = null;
   }
+  if (options.constraints !== undefined) {
+    self.constraints = options.constraints;
+  } else {
+    self.constraints = null;
+  }
   self.isOutgoing = false;
   self.isAnswered = false;
 }
@@ -1447,7 +1452,7 @@ AhoySipCall.prototype.startCall = function() {
         self.delegate.callFailed(self, error);
       }
     },
-    self.options.constraints
+    self.constraints
   );
 }
 
