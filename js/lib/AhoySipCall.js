@@ -377,7 +377,8 @@ AhoySipCall.prototype.startCall = function() {
       if (self.delegate.callFailed) {
         self.delegate.callFailed(self, error);
       }
-    }
+    },
+    self.options.constraints
   );
 }
 

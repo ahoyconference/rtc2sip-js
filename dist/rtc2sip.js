@@ -1446,7 +1446,8 @@ AhoySipCall.prototype.startCall = function() {
       if (self.delegate.callFailed) {
         self.delegate.callFailed(self, error);
       }
-    }
+    },
+    self.options.constraints
   );
 }
 
@@ -2219,6 +2220,7 @@ var RTC2SIP = RTC2SIP || {
       callingParty = { number: callingParty };
     }
     var callOptions = {
+      constraints: options.constraints,
       peerAddress: options.peerAddress,
       audioCodec: options.audioCodec,
       sip: options.sip,
