@@ -2169,7 +2169,13 @@ var RTC2SIP = RTC2SIP || {
           }
         );
       };
+      self.ws.onclose = function() {
+        self.ws = null;
+        console.log("rtc2sip_connection_lost");
+        callback('rtc2sip_connection_lost');
+      };
       self.ws.onerror = function(error) {
+        self.ws = null;
         console.log(error);
         callback('rtc2sip_init_failed');
       };
@@ -2261,6 +2267,25 @@ var RTC2SIP = RTC2SIP || {
     var videoTracks = stream.getVideoTracks();
     for (var i = 0; i < videoTracks.length; i++) {
       videoTracks[i].stop();
+    }
+  },
+  shutdown: function() {
+    var self = this;
+    var keys = Object.keys(self.calls);
+    keys.forEach(function(key) {
+      self.calls[key].terminate();
+    });
+    self.calls = {};
+    keys = Object.keys(self.sipRegistrations);
+    keys.forEach(function(key) {
+      self.sipRegistrations[key].unregister();
+    });
+    self.sipRegisrations = {};
+    if (self.ws) {
+      self.ws.onerror = null;
+      self.ws.onclose = null;
+      self.ws.close();
+      self.ws = null;
     }
   }
 }
