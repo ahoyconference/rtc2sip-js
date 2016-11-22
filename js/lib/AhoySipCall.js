@@ -439,6 +439,32 @@ AhoySipCall.prototype.terminate = function() {
   self.destroy();
 }
 
+AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
+  var self = this;
+  if (!duration) duration = 150;
+  if (!gap) gap = 100;
+  if (self.pc && self.localStream && (self.pc.createDTMFSender !== undefined)) {
+    if (self.dtmfSender === undefined) {
+      var audioTracks = self.localStream.getAudioTracks();
+      if (audioTracks && audioTracks.length) {
+        self.dtmfSender = self.pc.createDTMFSender(audioTracks[0]);
+      }
+    }
+    if (self.dtmfSender) {
+      if (duration < 70) {
+        duration = 70;
+      }
+      if (duration > 6000) {
+        duration = 6000;
+      }
+      if (gap < 50) {
+        gap = 50;
+      }
+      self.dtmfSender.insertDTMF(tones, duration, gap);
+    }
+  }
+}
+
 AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAhoyId) {
   var self = this;
   var tmp = xAhoyId.split("@");
