@@ -205,41 +205,17 @@ var RTC2SIP = RTC2SIP || {
   },
   init: function(options, callback) {
     var self = this;
-    self.errorCallback = callback;
-    self.wsUrl = options.wsUrl;
     self.isCallWaitingEnabled = (options.enableCallWaiting !== undefined)?options.enableCallWaiting:false;
-    if (!self.ws) {
-      self.initCallback = function(error) {
-        self.initCallback = null;
-        callback(error);
-      };
-      self.ws = new WebSocket(self.wsUrl, 'ahoyrtc-protocol');
-      self.ws.onopen = function() {
-        self.send(
-          {
-            identityRequest: {
-    	      uuid: self.generateUuid()
-            }
-          }
-        );
-      };
-      self.ws.onclose = function() {
-        self.ws = null;
-        console.log("rtc2sip_connection_lost");
-        callback('rtc2sip_connection_lost');
-      };
-      self.ws.onerror = function(error) {
-        self.ws = null;
-        console.log(error);
-        callback('rtc2sip_init_failed');
-      };
-      self.ws.onmessage = function(message) {
-        var msg = null;
-        try {
-          msg = JSON.parse(message.data);
-        } catch (error) {
-          console.log(error);
-        }
+    self.errorCallback = callback;
+    self.initCallback = function(error) {
+      self.initCallback = null;
+      callback(error);
+    };
+    if (options.transport) {
+      self.send = function(message) {
+        options.transport.send(message);
+      }
+      options.transport.onmessage = function(msg) {
         if (msg) {
           if (msg.messageEvent) {
             self.handleMessageEvent(msg.messageEvent);
@@ -248,7 +224,7 @@ var RTC2SIP = RTC2SIP || {
               self.address = msg.identityResponse.address;
               self.subAddress = self.address + '_' + msg.identityResponse.session;
               if (self.initCallback) {
-        	self.initCallback();
+                self.initCallback();
               }
             } else {
     	      self.initCallbacK('failed');
@@ -256,6 +232,68 @@ var RTC2SIP = RTC2SIP || {
           }
         }
       };
+      options.transport.onerror = function(error) {
+        console.log(error);
+        callback('rtc2sip_init_failed');
+      };
+      options.transport.onclose = function() {
+        console.log("rtc2sip_connection_lost");
+        callback('rtc2sip_connection_lost');
+      };
+      self.send(
+        {
+          identityRequest: {
+    	    uuid: self.generateUuid()
+          }
+        }
+      );
+    } else {
+      self.wsUrl = options.wsUrl;
+      if (!self.ws) {
+        self.ws = new WebSocket(self.wsUrl, 'ahoyrtc-protocol');
+        self.ws.onopen = function() {
+          self.send(
+            {
+              identityRequest: {
+    	        uuid: self.generateUuid()
+              }
+            }
+          );
+        };
+        self.ws.onclose = function() {
+          self.ws = null;
+          console.log("rtc2sip_connection_lost");
+          callback('rtc2sip_connection_lost');
+        };
+        self.ws.onerror = function(error) {
+          self.ws = null;
+          console.log(error);
+          callback('rtc2sip_init_failed');
+        };
+        self.ws.onmessage = function(message) {
+          var msg = null;
+          try {
+            msg = JSON.parse(message.data);
+          } catch (error) {
+            console.log(error);
+          }
+          if (msg) {
+            if (msg.messageEvent) {
+              self.handleMessageEvent(msg.messageEvent);
+            } else if (msg.identityResponse) {
+              if (msg.identityResponse.success) {
+                self.address = msg.identityResponse.address;
+                self.subAddress = self.address + '_' + msg.identityResponse.session;
+                if (self.initCallback) {
+        	  self.initCallback();
+                }
+              } else {
+    	        self.initCallbacK('failed');
+              }
+            }
+          }
+        };
+      }
     }
   },
   register: function(options, delegate, callback) {
