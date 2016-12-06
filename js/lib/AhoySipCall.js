@@ -17,7 +17,7 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.client = client;
   self.delegate = delegate;
   self.uuid = uuid || client.generateUuid();
-  if (options.audioCodec !== undefined) {
+  if (options.audioCodec) {
     self.audioCodec = options.audioCodec.toLowerCase();
   }  else {
     self.audioCodec = null;
@@ -482,7 +482,7 @@ AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAh
   self.localStream = stream;
   self.remoteMedia = remoteMedia;
 
-  if (options.audioCodec !== undefined) {
+  if (options.audioCodec) {
     self.audioCodec = options.audioCodec.toLowerCase();
   }  else {
     self.audioCodec = null;
@@ -593,7 +593,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
   self.localStream = stream;
   self.remoteMedia = remoteMedia;
   self.isAnswered = true;
-  if (options.audioCodec !== undefined) {
+  if (options.audioCodec) {
     self.audioCodec = options.audioCodec.toLowerCase();
   }  else {
     self.audioCodec = null;
@@ -719,7 +719,7 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
   self.localStream = stream;
   self.remoteMedia = remoteMedia;
   self.isAnswered = true;
-  if (options.audioCodec !== undefined) {
+  if (options.audioCodec) {
     self.audioCodec = options.audioCodec.toLowerCase();
   }  else {
     self.audioCodec = null;
