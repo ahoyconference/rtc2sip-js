@@ -1898,7 +1898,8 @@ function AhoySipRegistration(options, client, delegate, callback) {
 
   self.callback = callback;
   self.client = client;
-  
+
+  self.isRegistered = false;
   self.delegate = delegate || function(call) { call.reject(); };
   self.register();
 }
@@ -1906,21 +1907,33 @@ function AhoySipRegistration(options, client, delegate, callback) {
 AhoySipRegistration.prototype.register = function() {
   var self = this;
   var uuid = self.client.generateUuid();
-  var request = {
-    registerRequest: {
-      registrar: self.registrar,
-      username: self.username,
-      password: self.password,
-      refresh: self.refresh,
-      useragent: self.useragent,
-      proxyUrl: self.proxyUrl?self.proxyUrl:null,
-      uuid: uuid
-    }
-  };
+  var request = null;
+  if (self.isRegistered && self.id) {
+    request = {
+      registerRequest: {
+        registrationId: self.id,
+        uuid: uuid
+      }
+    };
+  } else {
+    request = {
+      registerRequest: {
+        registrar: self.registrar,
+        username: self.username,
+        password: self.password,
+        refresh: self.refresh,
+        useragent: self.useragent,
+        proxyUrl: self.proxyUrl?self.proxyUrl:null,
+        uuid: uuid
+      }
+    };
+  }
   self.client.sendSipRequest(request, uuid, function(response) {
     if (!response || !response.registration) {
+      self.isRegistered = false;
       self.callback("error", self);
     } else {
+      self.isRegistered = true;
       self.id = response.registration.id;
       self.callback(response.error, self);
     }
