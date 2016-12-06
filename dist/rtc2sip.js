@@ -1297,15 +1297,15 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
 	if (self.localStream) {
 	  self.pc.addStream(self.localStream);
 	}
+        if (self.audioCodec) {
+	  msg.sessionOffer.sdp = AhoySdpForceAudioCodec(msg.sessionOffer.sdp, self.audioCodec);
+        }
         self.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: msg.sessionOffer.sdp });
         self.pc.setRemoteDescription(
           self.remoteDescription,
           function setRemoteSuccess() {
             self.pc.createAnswer(
         	function createAnswerSuccess(description) {
-        	  if (self.audioCodec) {
-        	    description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
-        	  }
         	  self.pc.setLocalDescription(
         	    description,
         	    function setLocalSuccess() {
@@ -1838,6 +1838,10 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
   }
 
   if (self.remoteDescription) {
+    if (self.audioCodec) {
+      self.remoteDescription.sdp = AhoySdpForceAudioCodec(self.remoteDescription.sdp, self.audioCodec);
+      self.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: self.remoteDescription.sdp });
+    }
     self.pc.setRemoteDescription(
       self.remoteDescription,
       function setRemoteSuccess() {
