@@ -358,7 +358,7 @@ AhoySipCall.prototype.startCall = function() {
   }
   self.pc.onaddstream = function(event) {
     self.remoteStream = event.stream;
-    attachMediaStream(self.remoteMedia, self.remoteStream);
+    self.remoteMedia.srcObject = self.remoteStream;
   }
 
   self.pc.createOffer(
@@ -529,7 +529,7 @@ AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAh
   }
   self.pc.onaddstream = function(event) {
     self.remoteStream = event.stream;
-    attachMediaStream(self.remoteMedia, self.remoteStream);
+    self.remoteMedia.srcObject  = self.remoteStream;
   }
 
   var candidates = [];
@@ -662,7 +662,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
 
   self.pc.onaddstream = function(event) {
     self.remoteStream = event.stream;
-    attachMediaStream(self.remoteMedia, self.remoteStream);
+    self.remoteMedia = self.remoteStream;
   }
 
   if (self.remoteDescription) {
@@ -766,7 +766,7 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
   }
   self.pc.onaddstream = function(event) {
     self.remoteStream = event.stream;
-    attachMediaStream(self.remoteMedia, self.remoteStream);
+    self.remoteMedia = self.remoteStream;
   }
 
   if (self.remoteDescription) {

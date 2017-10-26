@@ -4,7 +4,7 @@ module.exports = function (grunt) {
   concat: {
     rtc2sip: {
       src: [
-	"js/vendor/*.js",
+	"node_modules/webrtc-adapter/out/adapter.js",
 	"js/lib/*.js"
       ],
       dest: 'dist/rtc2sip.js'

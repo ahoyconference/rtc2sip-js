@@ -23,7 +23,7 @@ After successfully initializing rtc2sip get access to the microphone (make sure 
 
       <script language="JavaScript">
       var remoteMedia = document.getElementById('remoteMedia');
-      getUserMedia(
+      navigator.getUserMedia(
           { audio: true, video: false },
           function userMediaSuccess(stream) {
             var callDelegate = {
@@ -79,7 +79,7 @@ After successfully initializing rtc2sip get access to the microphone (make sure 
               console.log('registration error: ' + JSON.stringify(error));
             } else {
                console.log('registered at sip server.');
-              getUserMedia(
+              navigator.getUserMedia(
                 { audio: true, video: false },
                 function userMediaSuccess(stream) {
                   var callDelegate = {
@@ -122,7 +122,7 @@ After successfully initializing rtc2sip get access to the microphone (make sure 
           callReceived: function(call) {
             console.log('incoming call from ' + call.callingParty.number + ' on ' + call.calledParty.number);
 
-            getUserMedia(
+            navigator.getUserMedia(
               { audio: true, video: false },
               function userMediaSuccess(stream) {
                 var callDelegate = {

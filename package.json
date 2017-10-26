@@ -16,5 +16,8 @@
   "scripts": {
     "prestart": "npm install",
     "start": "grunt"
+  },
+  "dependencies": {
+    "webrtc-adapter": "^5.0.6"
   }
 }
