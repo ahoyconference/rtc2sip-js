@@ -662,7 +662,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
 
   self.pc.onaddstream = function(event) {
     self.remoteStream = event.stream;
-    self.remoteMedia = self.remoteStream;
+    self.remoteMedia.srcObject = self.remoteStream;
   }
 
   if (self.remoteDescription) {
@@ -766,7 +766,7 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
   }
   self.pc.onaddstream = function(event) {
     self.remoteStream = event.stream;
-    self.remoteMedia = self.remoteStream;
+    self.remoteMedia.srcObject = self.remoteStream;
   }
 
   if (self.remoteDescription) {
