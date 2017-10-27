@@ -4739,14 +4739,17 @@ AhoySipCall.prototype.sendSessionOffer = function() {
       sip.proxyUrl = self.sip.proxyUrl;
     }
   }
+  var sdp = self.localDescription.sdp;
+  if (self.isOnHold) {
+   sdp = sdp.replace("a=recvonly", "a=sendonly");
+  }
   var request = {
     sessionOffer: {
-      sdp: self.localDescription.sdp,
+      sdp: sdp,
       sip: sip,
       uuid: self.uuid
     }
   };
-
   self.client.sendWebRtcRequest(request, self.uuid, self.peerAddress);
   sip.password = null;
   self.sip.password = null;
