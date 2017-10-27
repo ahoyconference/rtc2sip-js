@@ -4890,6 +4890,9 @@ AhoySipCall.prototype.terminate = function() {
     return self.reject();
   }
   self.client.sendWebRtcResponse(response, self.peerAddress);
+  if (self.delegate.callTerminated) {
+    self.delegate.callTerminated(self);
+  }
   self.destroy();
 }
 
