@@ -446,6 +446,34 @@ AhoySipCall.prototype.terminate = function() {
   self.destroy();
 }
 
+AhoySipCall.prototype.transfer = function(calledPartyNumber) {
+  var self = this;
+  var response = {
+    sessionTransfer: {
+      sip: {
+        calledPartyNumber: calledPartyNumber
+      },
+      uuid: self.uuid
+    }
+  };
+
+  self.client.sendWebRtcResponse(response, self.peerAddress);
+}
+
+AhoySipCall.prototype.merge = function(call) {
+  var self = this;
+  if (!call) return;
+
+  var response = {
+    sessionMerge: {
+      mergeUuid: call.uuid,
+      uuid: self.uuid
+    }
+  };
+
+  self.client.sendWebRtcResponse(response, self.peerAddress);
+}
+
 AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
   var self = this;
   if (!duration) duration = 150;
