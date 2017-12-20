@@ -87,6 +87,9 @@ AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia,
     callingParty = { number: callingParty };
   }
   var callOptions = {
+    sip: {
+      registrationId: self.id
+    },
     audioCodec: options.audioCodec,
     calledParty: calledParty,
     callingParty: callingParty,
