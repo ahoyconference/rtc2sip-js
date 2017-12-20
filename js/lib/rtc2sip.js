@@ -97,6 +97,12 @@ var RTC2SIP = RTC2SIP || {
     } else if (msg.sessionConfirm) {
       uuid = msg.sessionConfirm.uuid;
       messageType = 'sessionConfirm';
+    } else if (msg.sessionTransferResult) {
+      uuid = msg.sessionTransferResult.uuid;
+      messageType = 'sessionTransferResult';
+    } else if (msg.sessionMergeResult) {
+      uuid = msg.sessionMergeResult.uuid;
+      messageType = 'sessionMergeResult';
     }
     if (!uuid || !messageType) {
       console.log("no uuid " + uuid + " or messageType " + messageType);

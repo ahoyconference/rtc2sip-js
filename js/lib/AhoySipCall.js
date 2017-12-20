@@ -36,6 +36,8 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.isOutgoing = false;
   self.isAnswered = false;
   self.isOnHold = false;
+  self.transferCallback = null;
+  self.mergeCallback = null;
 }
 
 AhoySipCall.prototype.destroyPeerConnection = function() {
@@ -160,6 +162,26 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
         self.delegate.callTerminated(self);
       }
       self.destroy();
+    } else if (msg.sessionTransferResult) {
+      if (self.transferCallback) {
+        var callback = self.transferCallback;
+        self.transferCallback = null;
+        if (msg.sessionTransferResult.error) {
+          callback(msg.sessionTransferResult.error);
+        } else {
+          callback();
+        }
+      }
+    } else if (msg.sessionMergeResult) {
+      if (self.mergeCallback) {
+        var callback = self.mergeCallback;
+        self.mergeCallback = null;
+        if (msg.sessionMergeResult.error) {
+          callback(msg.sessionMergeResult.error);
+        } else {
+          callback();
+        }
+      }
     } else if (msg.sessionConfirm) {
       if (msg.sessionConfirm.address !== self.client.subAddress) {
         if (self.delegate.callTerminated) {
@@ -450,7 +472,7 @@ AhoySipCall.prototype.terminate = function() {
   self.destroy();
 }
 
-AhoySipCall.prototype.transfer = function(calledPartyNumber) {
+AhoySipCall.prototype.transfer = function(calledPartyNumber, callback) {
   var self = this;
   var response = {
     sessionTransfer: {
@@ -460,11 +482,11 @@ AhoySipCall.prototype.transfer = function(calledPartyNumber) {
       uuid: self.uuid
     }
   };
-
+  self.transferCallback = callback;
   self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
-AhoySipCall.prototype.merge = function(call) {
+AhoySipCall.prototype.merge = function(call, callback) {
   var self = this;
   if (!call) return;
 
@@ -474,7 +496,7 @@ AhoySipCall.prototype.merge = function(call) {
       uuid: self.uuid
     }
   };
-
+  self.mergeCallback = callback;
   self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
