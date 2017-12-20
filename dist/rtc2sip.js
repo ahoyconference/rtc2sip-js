@@ -4458,6 +4458,7 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.callingParty = options.callingParty;
   self.timeout = options.timeout;
   self.sip = options.sip?options.sip:{};
+  self.data = options.data?options.data:null;
 
   self.localStream = localStream;
   self.remoteStream = null;
@@ -4750,6 +4751,9 @@ AhoySipCall.prototype.sendSessionOffer = function() {
       uuid: self.uuid
     }
   };
+  if (self.data) {
+    request.sessionOffer.data = self.data;
+  }
   self.client.sendWebRtcRequest(request, self.uuid, self.peerAddress);
   sip.password = null;
   self.sip.password = null;
@@ -5442,6 +5446,9 @@ AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia,
     callingParty = { number: callingParty };
   }
   var callOptions = {
+    sip: {
+      registrationId: self.id
+    },
     audioCodec: options.audioCodec,
     calledParty: calledParty,
     callingParty: callingParty,
@@ -5786,7 +5793,8 @@ var RTC2SIP = RTC2SIP || {
       sip: options.sip,
       calledParty: calledParty,
       callingParty: callingParty,
-      timeout: timeout
+      timeout: timeout,
+      data: options.data
     };
     var call = new AhoySipCall(null, callOptions, localStream, remoteMedia, self, delegate);
     if (call) {

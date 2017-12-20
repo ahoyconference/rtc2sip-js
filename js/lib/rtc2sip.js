@@ -329,7 +329,8 @@ var RTC2SIP = RTC2SIP || {
       sip: options.sip,
       calledParty: calledParty,
       callingParty: callingParty,
-      timeout: timeout
+      timeout: timeout,
+      data: options.data
     };
     var call = new AhoySipCall(null, callOptions, localStream, remoteMedia, self, delegate);
     if (call) {
