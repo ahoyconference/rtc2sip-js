@@ -4473,7 +4473,7 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   var self = this;
   self.pc = null;
   self.pc_config = null;
-  self.turn = (options && options.turn) || null;
+  self.turn = options.turn?options.turn:null;
 
   self.calledParty = options.calledParty;
   self.callingParty = options.callingParty;
@@ -5496,7 +5496,10 @@ AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia,
     calledParty: calledParty,
     callingParty: callingParty,
     timeout: timeout
-  };
+  }
+  if (self.turn) {
+    callOptions.turn = self.turn;
+  }
   var call = new AhoySipCall(null, callOptions, localStream, remoteMedia, self.client, delegate);
   if (call) {
     self.client.addCall(call.uuid, call);
@@ -5535,6 +5538,7 @@ var RTC2SIP = RTC2SIP || {
   requestCallbacks: {},
   sipRegistrations: {},
   calls: {},
+  turn: null,
   sendRequest: function(request, uuid, destination, requestCallback) {
     var self = this;
     if (requestCallback) {
@@ -5736,6 +5740,9 @@ var RTC2SIP = RTC2SIP || {
             if (msg.identityResponse.success) {
               self.address = msg.identityResponse.address;
               self.subAddress = self.address + '_' + msg.identityResponse.session;
+              if (msg.identityResponse.turn) {
+                self.turn = msg.identityResponse.turn;
+              }
               if (self.initCallback) {
                 self.initCallback();
               }
@@ -5797,6 +5804,9 @@ var RTC2SIP = RTC2SIP || {
               if (msg.identityResponse.success) {
                 self.address = msg.identityResponse.address;
                 self.subAddress = self.address + '_' + msg.identityResponse.session;
+                if (msg.identityResponse.turn) {
+                  self.turn = msg.identityResponse.turn;
+                }
                 if (self.initCallback) {
         	  self.initCallback();
                 }
@@ -5816,6 +5826,9 @@ var RTC2SIP = RTC2SIP || {
         self.sipRegistrations[registration.id] = registration;
       } else if (self.sipRegistrations[registration.id] !== undefined) {
         delete self.sipRegistrations[registration.id];
+      }
+      if (self.turn) {
+        options.turn = self.turn;
       }
       callback(error, registration);
     }
@@ -5845,6 +5858,9 @@ var RTC2SIP = RTC2SIP || {
       timeout: timeout,
       data: options.data
     };
+    if (self.turn) {
+      callOptions.turn = self.turn;
+    }
     var call = new AhoySipCall(null, callOptions, localStream, remoteMedia, self, delegate);
     if (call) {
       self.addCall(call.uuid, call);

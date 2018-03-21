@@ -2,7 +2,7 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   var self = this;
   self.pc = null;
   self.pc_config = null;
-  self.turn = (options && options.turn) || null;
+  self.turn = options.turn?options.turn:null;
 
   self.calledParty = options.calledParty;
   self.callingParty = options.callingParty;

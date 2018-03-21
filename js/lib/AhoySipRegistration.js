@@ -94,7 +94,10 @@ AhoySipRegistration.prototype.call = function(options, localStream, remoteMedia,
     calledParty: calledParty,
     callingParty: callingParty,
     timeout: timeout
-  };
+  }
+  if (self.turn) {
+    callOptions.turn = self.turn;
+  }
   var call = new AhoySipCall(null, callOptions, localStream, remoteMedia, self.client, delegate);
   if (call) {
     self.client.addCall(call.uuid, call);
