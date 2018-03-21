@@ -671,7 +671,6 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
       };
     }
   }
-  self.pc = new RTCPeerConnection(self.pc_config);
 
   self.pc = new RTCPeerConnection(self.pc_config);
   if (self.localStream) {
