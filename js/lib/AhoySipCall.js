@@ -207,7 +207,6 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
         );
       }
     } else if (msg.sessionAnswer) {
-      self.isAnswered = true;
       if (msg.sessionAnswer.candidates) {
 	var remoteIceCandidates = msg.sessionAnswer.candidates;
 	if (remoteIceCandidates && remoteIceCandidates.length) {
@@ -230,9 +229,10 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
               self.pc.addIceCandidate(candidate);
             });
             self.remoteIceCandidates = [];
-            if (!self.isAnswered && self.delegate.callAnswered) {
+            if (!self.isAnswered && self.isOutgoing && self.delegate.callAnswered) {
               self.delegate.callAnswered(self);
             }
+            self.isAnswered = true;
           },
           function setRemoteError(error) {
             if (self.delegate.callFailed) {
@@ -241,9 +241,10 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
           }
         );
       } else {
-        if (!self.isAnswered && self.delegate.callAnswered) {
+        if (!self.isAnswered && self.isOutgoing && self.delegate.callAnswered) {
           self.delegate.callAnswered(self);
         }
+        self.isAnswered = true;
       }
     } else if (msg.sessionOffer) {
       if (msg.sessionOffer.sdp) {
