@@ -101,7 +101,7 @@ After successfully initializing rtc2sip get access to the microphone (make sure 
                   var options = {
                     calledParty: "666",
                     callingParty: "1234",
-                    timeout: 60,
+                    timeout: 60
                   };
                   registration.call(options, stream, remoteMedia, callDelegate);
                 },
