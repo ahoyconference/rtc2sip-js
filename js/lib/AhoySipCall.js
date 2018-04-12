@@ -894,4 +894,5 @@ AhoySipCall.prototype.resume = function(callback) {
   self.isOnHold = false;
   self.destroyPeerConnection();
   self.startCall();
+  if (callback) callback();
 }
