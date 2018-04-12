@@ -5187,6 +5187,8 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
         );
       }
     } else if (msg.sessionAnswer) {
+      if (self.isOnHold) return;
+
       if (msg.sessionAnswer.candidates) {
 	var remoteIceCandidates = msg.sessionAnswer.candidates;
 	if (remoteIceCandidates && remoteIceCandidates.length) {
@@ -5858,48 +5860,13 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
 
 AhoySipCall.prototype.hold = function(callback) {
   var self = this;
-  var audio = false;
-  var video = false;
+
   self.isOnHold = true;
-  if (self.localStream && (self.localStream.getAudioTracks().length > 0)) {
-    audio = true;
-  }
-  if (self.localStream && (self.localStream.getVideoTracks().length > 0)) {
-    video = true;
-  }
-  var constraints = { offerToReceiveAudio: audio, offerToReceiveVideo: video };
   self.destroyPeerConnection();
-  if (self.turn && self.turn.urls) {
-    var iceServers = [];
-    self.turn.urls.forEach(function(url) {
-      iceServers.push( { url: url, urls: url, username: self.turn.username, credential: self.turn.credential } );
-    });
-    if (iceServers.length > 0) {
-      self.pc_config = {
-        "iceServers": iceServers
-      };
-    }
-  }
-  self.pc = new RTCPeerConnection(self.pc_config);
-  self.pc.createOffer(
-    function createOfferSuccess(description) {
-      self.pc.setLocalDescription(
-        description,
-        function setLocalSuccess() {
-          self.localDescription = description;
-          self.sendSessionOffer();
-          if (callback) callback();
-        },
-        function setLocalError(error) {
-          if (callback) callback(error);
-        }
-      );
-    },
-    function createOfferError(error) {
-      if (callback) callback(error);
-    },
-    constraints
-  );
+  self.localDescription = new RTCSessionDescription({ type: "offer", sdp: self.localDescription.sdp.replace("a=sendrecv", "a=recvonly") });
+
+  self.sendSessionOffer();
+  if (callback) callback();
 }
 
 AhoySipCall.prototype.resume = function(callback) {
