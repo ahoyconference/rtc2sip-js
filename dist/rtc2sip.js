@@ -5483,17 +5483,30 @@ AhoySipCall.prototype.merge = function(call, callback) {
   self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
+AhoySipCall.prototype.getDTMFSender = function() {
+  var self = this;
+  if (self.dtmfSender !== undefined) {
+    return self.dtmfSender;
+  }
+  
+  if (self.pc && self.pc.getSenders) {
+    var senders = self.pc.getSenders();
+    var audioSender = senders.find(function(sender) {
+      return sender.track && sender.track.kind === 'audio';
+    });
+    if (audioSender && audioSender.dtmf && audioSender.dtmf.canInsertDTMF) {
+      self.dtmfSender = audioSender.dtmf;
+    }
+  }
+  return self.dtmfSender;
+}
+
 AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
   var self = this;
   if (!duration) duration = 150;
   if (!gap) gap = 100;
-  if (self.pc && self.localStream && (self.pc.createDTMFSender !== undefined)) {
-    if (self.dtmfSender === undefined) {
-      var audioTracks = self.localStream.getAudioTracks();
-      if (audioTracks && audioTracks.length) {
-        self.dtmfSender = self.pc.createDTMFSender(audioTracks[0]);
-      }
-    }
+  if (self.pc && self.localStream) {
+    self.getDTMFSender();
     if (self.dtmfSender) {
       if (duration < 70) {
         duration = 70;
@@ -5511,7 +5524,8 @@ AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
 
 AhoySipCall.prototype.canSendDTMF = function() {
   var self = this;
-  return (self.pc && (self.pc.createDTMFSender !== undefined)) ? true : false;
+  var dtmfSender = self.getDTMFSender();
+  return dtmfSender ? true : false;
 }
 
 AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAhoyId) {
