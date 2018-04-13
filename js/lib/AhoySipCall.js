@@ -529,7 +529,7 @@ AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
   }
 }
 
-AhoySipCall.prototype.canDTMF = function() {
+AhoySipCall.prototype.canSendDTMF = function() {
   var self = this;
   return (self.pc && (self.pc.createDTMFSender !== undefined)) ? true : false;
 }
