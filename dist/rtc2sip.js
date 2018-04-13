@@ -5509,6 +5509,11 @@ AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
   }
 }
 
+AhoySipCall.prototype.canSendDTMF = function() {
+  var self = this;
+  return (self.pc && (self.pc.createDTMFSender !== undefined)) ? true : false;
+}
+
 AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAhoyId) {
   var self = this;
   var tmp = xAhoyId.split("@");
@@ -5874,6 +5879,7 @@ AhoySipCall.prototype.resume = function(callback) {
   self.isOnHold = false;
   self.destroyPeerConnection();
   self.startCall();
+  if (callback) callback();
 }
 
 function AhoySipRegistration(options, client, delegate, callback) {
