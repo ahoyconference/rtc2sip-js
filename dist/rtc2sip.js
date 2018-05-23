@@ -5016,6 +5016,7 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.isOutgoing = false;
   self.isAnswered = false;
   self.isOnHold = false;
+  self.isResuming = false;
   self.transferCallback = null;
   self.mergeCallback = null;
 }
@@ -5119,6 +5120,104 @@ function AhoySdpForceAudioCodec(sdp, audioCodec) {
     return output.join('\r\n');
 }
 
+function AhoyParseAudioCodecs(sdp) {
+    var parsingAudio = false;
+    var lines = sdp.split('\r\n');
+    var payloadType = null;
+    var audioCodecs = { byPayloadType: {}, byMimeType: {}, priority: []};
+
+    function getPayloadType(line) {
+      var pt = null;
+      var tmp = line.split(' ');
+      if (tmp && tmp.length) {
+        tmp = tmp[0].split(':');
+        if (tmp && (tmp.length > 1)) {
+          pt = tmp[1];
+        }
+      }
+      return pt;
+    }
+
+    function getPayloadMimeType(line) {
+      var tmp = line.split(' ');
+      if (tmp && tmp.length) {
+        return tmp[1].toLowerCase();
+      }
+      return null;
+    }
+
+    lines.forEach(function(line) {
+      if (line.indexOf('m=audio') !== -1) {
+        parsingAudio = true;
+        var tmp = line.split(' ');
+        var codecs = tmp.slice(3, tmp.length);
+        codecs.forEach(function(codec) {
+          audioCodecs.priority.push(codec);
+          audioCodecs.byPayloadType[codec] = { payloadType: codec, mimeType: null, "rtcp-fb": [], "fmtp": [] };
+        });
+      } else if ((line.toLowerCase().indexOf('a=rtpmap:') !== -1)) {
+        var pt = getPayloadType(line);
+        if (parsingAudio) {
+          var mimeType = getPayloadMimeType(line);
+          audioCodecs.byPayloadType[pt].mimeType = mimeType;
+          audioCodecs.byMimeType[mimeType] = audioCodecs.byPayloadType[pt];
+        }
+      } else if ((line.toLowerCase().indexOf('a=rtcp-fb:') !== -1)) {
+        var pt = getPayloadType(line);
+        if (parsingAudio) {
+          audioCodecs.byPayloadType[pt]['rtcp-fb'].push(line.substring(('a=rtcp-fb:'+pt).length + 1));
+        }
+      } else if ((line.toLowerCase().indexOf('a=fmtp:') !== -1)) {
+        var pt = getPayloadType(line);
+        if (parsingAudio) {
+          audioCodecs.byPayloadType[pt]['fmtp'].push(line.substring(('a=fmtp:'+pt).length + 1));
+        }
+      }
+    });
+    
+    return audioCodecs;
+}
+
+
+function AhoyOverwriteAudioCodecs(sdp, audioCodecs) {
+    var parsingAudio = false;
+    var lines = sdp.split('\r\n');
+    var output = [];
+
+    lines.forEach(function(line) {
+      if (line.indexOf('m=audio') !== -1) {
+        parsingAudio = true;
+        var tmp = line.split(' ');
+        tmp = tmp.splice(0, 3);
+        tmp = tmp.concat(audioCodecs.priority);
+	line = tmp.join(' ');
+        output.push(line);
+        var payloadTypes = Object.keys(audioCodecs.byPayloadType);
+        payloadTypes.forEach(function(pt) {
+          var codec = audioCodecs.byPayloadType[pt];
+          output.push('a=rtpmap:' + pt + ' ' + codec.mimeType);
+          codec.fmtp.forEach(function(fmtp) {
+            output.push('a=fmtp:' + pt + ' ' + fmtp);
+          });
+          codec['rtcp-fb'].forEach(function(rtcp_fb) {
+            output.push('a=rtcp-fb:' + pt + ' ' + rtcp_fb);
+          });
+        });
+      } else if ((line.toLowerCase().indexOf('a=rtpmap:') !== -1)) {
+	if (!parsingAudio) output.push(line);
+      } else if ((line.toLowerCase().indexOf('a=rtcp-fb:') !== -1)) {
+	if (!parsingAudio) output.push(line);
+      } else if ((line.toLowerCase().indexOf('a=fmtp:') !== -1)) {
+	if (!parsingAudio) output.push(line);
+      } else {
+        output.push(line);
+      }
+    });
+    
+    return output.join('\r\n');
+}
+
+
 AhoySipCall.prototype.handleWebRtc = function(msg, from) {
   var self = this;
     if (msg.sessionReject) {
@@ -5188,6 +5287,51 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
       }
     } else if (msg.sessionAnswer) {
       if (self.isOnHold) return;
+      
+      if (self.isResuming && msg.sessionAnswer.sdp) {
+        self.isResuming = false;
+        var offerAudioCodecs = AhoyParseAudioCodecs(self.localDescription.sdp);
+        var answerAudioCodecs = AhoyParseAudioCodecs(msg.sessionAnswer.sdp);
+        var audioCodecs = { priority: answerAudioCodecs.priority, byPayloadType: [] };
+
+        var mimeTypes = Object.keys(answerAudioCodecs.byMimeType);
+        mimeTypes.forEach(function(mimeType) {
+          if (offerAudioCodecs.byMimeType[mimeType]) {
+            var answerPayloadType = answerAudioCodecs.byMimeType[mimeType].payloadType;
+            var offerPayloadType = offerAudioCodecs.byMimeType[mimeType].payloadType;
+            offerAudioCodecs.byMimeType[mimeType].payloadType = answerPayloadType;
+            audioCodecs.byPayloadType[answerPayloadType] = offerAudioCodecs.byMimeType[mimeType];
+          }
+        });
+        var sdp = AhoyOverwriteAudioCodecs(self.localDescription.sdp, audioCodecs);
+
+        self.localDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
+        self.remoteDescription = new RTCSessionDescription({ type: "answer", sdp: msg.sessionAnswer.sdp });
+
+        self.pc.setLocalDescription(
+          self.localDescription,
+          function setLocalSuccess() {
+            self.pc.setRemoteDescription(
+              self.remoteDescription,
+              function setRemoteSuccess() {
+              },
+              function setRemoteError(error) {
+              console.log(error);
+                if (self.delegate.callFailed) {
+                  self.delegate.callFailed(self, error);
+                }
+              }
+            );
+          },
+          function setLocalError(error) {
+              console.log(error);
+            if (self.delegate.callFailed) {
+              self.delegate.callFailed(self, error);
+            }
+          }
+        );
+        return;
+      }
 
       if (msg.sessionAnswer.candidates) {
 	var remoteIceCandidates = msg.sessionAnswer.candidates;
@@ -5297,7 +5441,7 @@ AhoySipCall.prototype.sendSessionOffer = function() {
   }
   var sdp = self.localDescription.sdp;
   if (self.isOnHold) {
-   sdp = sdp.replace("a=recvonly", "a=sendonly");
+   sdp = self.localDescription.sdp.replace('a=sendrecv', 'a=sendonly');
   }
   var request = {
     sessionOffer: {
@@ -5329,7 +5473,7 @@ AhoySipCall.prototype.sendSessionAnswer = function(candidates) {
 
 AhoySipCall.prototype.startCall = function() {
   var self = this
-  console.log("AhoySipCall.startCall: uuid " + self.uuid);
+  console.log('AhoySipCall.startCall: uuid ' + self.uuid);
   self.isOutgoing = true;
   if (self.turn && self.turn.urls) {
     var iceServers = [];
@@ -5351,17 +5495,17 @@ AhoySipCall.prototype.startCall = function() {
     if (event.target && event.target.iceConnectionState) {
       state = event.target.iceConnectionState;
     }
-    console.log("iceConnectionState: " + state);
-    if (state === "connected") {
+    console.log('iceConnectionState: ' + state);
+    if (state === 'connected') {
       if (self.delegate.establishedConnection) {
         self.delegate.establishedConnection(self);
       }
-    } else if (state === "failed") {
+    } else if (state === 'failed') {
       if (self.call.delegate.callFailed) {
-        self.delegate.callFailed(self, "establishing secure connecton failed");
+        self.delegate.callFailed(self, 'establishing secure connecton failed');
       }
       self.terminate();
-    } else if ((state === "disconnected") || (state === "closed")) {
+    } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
       }
@@ -5511,9 +5655,9 @@ AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
 
 AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAhoyId) {
   var self = this;
-  var tmp = xAhoyId.split("@");
+  var tmp = xAhoyId.split('@');
   if (!tmp || (tmp.length != 2)) {
-    console.log("cannot directConnect with xAhoyId: " + xAhoyId);
+    console.log('cannot directConnect with xAhoyId: ' + xAhoyId);
     return self.answer(options, stream, remoteMedia);
   }
   self.client.removeCall(self.uuid);
@@ -5553,17 +5697,17 @@ AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAh
     if (event.target && event.target.iceConnectionState) {
       state = event.target.iceConnectionState;
     }
-    console.log("iceConnectionState: " + state);
-    if (state === "connected") {
+    console.log('iceConnectionState: ' + state);
+    if (state === 'connected') {
       if (self.delegate.establishedConnection) {
         self.delegate.establishedConnection(self);
       }
-    } else if (state === "failed") {
+    } else if (state === 'failed') {
       if (self.call.delegate.callFailed) {
-        self.delegate.callFailed(self, "establishing secure connecton failed");
+        self.delegate.callFailed(self, 'establishing secure connecton failed');
       }
       self.terminate();
-    } else if ((state === "disconnected") || (state === "closed")) {
+    } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
       }
@@ -5664,17 +5808,17 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
     if (event.target && event.target.iceConnectionState) {
       state = event.target.iceConnectionState;
     }
-    console.log("iceConnectionState: " + state);
-    if (state === "connected") {
+    console.log('iceConnectionState: ' + state);
+    if (state === 'connected') {
       if (self.delegate.establishedConnection) {
         self.delegate.establishedConnection(self);
       }
-    } else if (state === "failed") {
+    } else if (state === 'failed') {
       if (self.call.delegate.callFailed) {
-        self.delegate.callFailed(self, "establishing secure connecton failed");
+        self.delegate.callFailed(self, 'establishing secure connecton failed');
       }
       self.terminate();
-    } else if ((state === "disconnected") || (state === "closed")) {
+    } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
       }
@@ -5739,7 +5883,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
             if (self.delegate.callFailed) {
               self.delegate.callFailed(self, error);
             }
-            self.reject("error");
+            self.reject('error');
           }
         );
       },
@@ -5747,7 +5891,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
         if (self.delegate.callFailed) {
           self.delegate.callFailed(self, error);
         }
-        self.reject("error");
+        self.reject('error');
       }
     );
   }
@@ -5789,17 +5933,17 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
     if (event.target && event.target.iceConnectionState) {
       state = event.target.iceConnectionState;
     }
-    console.log("iceConnectionState: " + state);
-    if (state === "connected") {
+    console.log('iceConnectionState: ' + state);
+    if (state === 'connected') {
       if (self.delegate.establishedConnection) {
         self.delegate.establishedConnection(self);
       }
-    } else if (state === "failed") {
+    } else if (state === 'failed') {
       if (self.call.delegate.callFailed) {
-        self.delegate.callFailed(self, "establishing secure connecton failed");
+        self.delegate.callFailed(self, 'establishing secure connecton failed');
       }
       self.terminate();
-    } else if ((state === "disconnected") || (state === "closed")) {
+    } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
       }
@@ -5844,7 +5988,7 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
             if (self.delegate.callFailed) {
               self.delegate.callFailed(self, error);
             }
-            self.reject("error");
+            self.reject('error');
           }
         );
       },
@@ -5852,7 +5996,7 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
         if (self.delegate.callFailed) {
           self.delegate.callFailed(self, error);
         }
-        self.reject("error");
+        self.reject('error');
       }
     );
   }
@@ -5863,8 +6007,6 @@ AhoySipCall.prototype.hold = function(callback) {
 
   self.isOnHold = true;
   self.destroyPeerConnection();
-  self.localDescription = new RTCSessionDescription({ type: "offer", sdp: self.localDescription.sdp.replace("a=sendrecv", "a=recvonly") });
-
   self.sendSessionOffer();
   if (callback) callback();
 }
@@ -5872,8 +6014,55 @@ AhoySipCall.prototype.hold = function(callback) {
 AhoySipCall.prototype.resume = function(callback) {
   var self = this;
   self.isOnHold = false;
+  self.isResuming = true;
   self.destroyPeerConnection();
-  self.startCall();
+
+  self.pc = new RTCPeerConnection(self.pc_config);
+  if (self.localStream) {
+    self.pc.addStream(self.localStream);
+  }
+  self.pc.oniceconnectionstatechange = function(event) {
+    var state = event;
+    if (event.target && event.target.iceConnectionState) {
+      state = event.target.iceConnectionState;
+    }
+    console.log('iceConnectionState: ' + state);
+    if (state === 'connected') {
+      if (self.delegate.establishedConnection) {
+        self.delegate.establishedConnection(self);
+      }
+    } else if (state === 'failed') {
+      if (self.call.delegate.callFailed) {
+        self.delegate.callFailed(self, 'establishing secure connecton failed');
+      }
+      self.terminate();
+    } else if ((state === 'disconnected') || (state === 'closed')) {
+      if (self.delegate.callTerminated) {
+        self.delegate.callTerminated(self);
+      }
+      self.terminate();
+    }
+  }
+  self.pc.onaddstream = function(event) {
+    self.remoteStream = event.stream;
+    self.remoteMedia.srcObject = self.remoteStream;
+  }
+
+  self.pc.createOffer(
+    function createOfferSucces(description) {
+      if (self.audioCodec) {
+        description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+      }
+      self.localDescription = description;
+      self.sendSessionOffer();
+    },
+    function createOfferError(error) {
+      if (self.delegate.callFailed) {
+        self.delegate.callFailed(self, error);
+      }
+    },
+    self.constraints
+  );
 }
 
 function AhoySipRegistration(options, client, delegate, callback) {
