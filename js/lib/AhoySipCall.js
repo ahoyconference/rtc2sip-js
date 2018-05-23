@@ -673,6 +673,11 @@ AhoySipCall.prototype.sendDTMF = function(tones, duration, gap) {
   }
 }
 
+AhoySipCall.prototype.canSendDTMF = function() {
+  var self = this;
+  return (self.pc && (self.pc.createDTMFSender !== undefined)) ? true : false;
+}
+
 AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAhoyId) {
   var self = this;
   var tmp = xAhoyId.split('@');
@@ -1075,6 +1080,7 @@ AhoySipCall.prototype.resume = function(callback) {
       }
       self.localDescription = description;
       self.sendSessionOffer();
+      if (callback) callback();
     },
     function createOfferError(error) {
       if (self.delegate.callFailed) {
