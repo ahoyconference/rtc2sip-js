@@ -165,11 +165,13 @@ var RTC2SIP = RTC2SIP || {
               var localStream = call.localStream;
               var remoteMedia = call.remoteMedia;
               var delegate = call.delegate;
+              call.delegate = {};
               call.terminate();
               var callOptions = {
                 peerAddress: from
               }
-              call = new AhoySipCall(uuid, callOptions, null, null, self, delegate);
+              var directCall = new AhoySipCall(uuid, callOptions, null, null, self, delegate);
+	      directCall.cloneInto(call);
 	      if (sdp) {
 		call.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
 	      }

@@ -5017,8 +5017,17 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.isAnswered = false;
   self.isOnHold = false;
   self.isResuming = false;
+  self.isP2p = false;
   self.transferCallback = null;
   self.mergeCallback = null;
+}
+
+AhoySipCall.prototype.cloneInto = function(destination) {
+  var self = this;
+  var keys = Object.keys(self);
+  keys.forEach(function(key) {
+    destination[key] = self[key];
+  });
 }
 
 AhoySipCall.prototype.destroyPeerConnection = function() {
@@ -5234,11 +5243,13 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
         self.delegate.callCanceled(self);
       } else if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.destroy();
     } else if (msg.sessionTerminate) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.destroy();
     } else if (msg.sessionTransferResult) {
@@ -5265,6 +5276,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
       if (msg.sessionConfirm.address !== self.client.subAddress) {
         if (self.delegate.callTerminated) {
           self.delegate.callTerminated(self);
+          self.delegate.callTerminated = null;
         }
         self.destroy();
       }
@@ -5508,6 +5520,7 @@ AhoySipCall.prototype.startCall = function() {
     } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.terminate();
     }
@@ -5595,6 +5608,7 @@ AhoySipCall.prototype.terminate = function() {
   self.client.sendWebRtcResponse(response, self.peerAddress);
   if (self.delegate.callTerminated) {
     self.delegate.callTerminated(self);
+    self.delegate.callTerminated = null;
   }
   self.destroy();
 }
@@ -5671,6 +5685,7 @@ AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAh
   self.peerAddress = tmp[1];
   self.uuid = self.client.generateUuid();
   self.client.addCall(self.uuid, self);
+  self.isP2p = true;
 
   self.localStream = stream;
   self.remoteMedia = remoteMedia;
@@ -5715,6 +5730,7 @@ AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAh
     } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.terminate();
     }
@@ -5786,6 +5802,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
   self.localStream = stream;
   self.remoteMedia = remoteMedia;
   self.isAnswered = true;
+  self.isP2p = true;
   if (options.audioCodec) {
     self.audioCodec = options.audioCodec.toLowerCase();
   }  else {
@@ -5826,6 +5843,7 @@ AhoySipCall.prototype.directAnswer = function(options, stream, remoteMedia) {
     } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.terminate();
     }
@@ -5951,6 +5969,7 @@ AhoySipCall.prototype.answer = function(options, stream, remoteMedia) {
     } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.terminate();
     }
@@ -6044,6 +6063,7 @@ AhoySipCall.prototype.resume = function(callback) {
     } else if ((state === 'disconnected') || (state === 'closed')) {
       if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
+        self.delegate.callTerminated = null;
       }
       self.terminate();
     }
@@ -6346,11 +6366,13 @@ var RTC2SIP = RTC2SIP || {
               var localStream = call.localStream;
               var remoteMedia = call.remoteMedia;
               var delegate = call.delegate;
+              call.delegate = {};
               call.terminate();
               var callOptions = {
                 peerAddress: from
               }
-              call = new AhoySipCall(uuid, callOptions, null, null, self, delegate);
+              var directCall = new AhoySipCall(uuid, callOptions, null, null, self, delegate);
+	      directCall.cloneInto(call);
 	      if (sdp) {
 		call.remoteDescription = new RTCSessionDescription({ type: "offer", sdp: sdp });
 	      }
