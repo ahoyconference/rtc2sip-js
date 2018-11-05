@@ -28,6 +28,7 @@ var RTC2SIP = RTC2SIP || {
   requestCallbacks: {},
   sipRegistrations: {},
   calls: {},
+  conferences: {},
   turn: null,
   sendRequest: function(request, uuid, destination, requestCallback) {
     var self = this;
@@ -40,9 +41,9 @@ var RTC2SIP = RTC2SIP || {
     var self = this;
     self.sendRequest( { sip: request }, uuid, null, callback );
   },
-  sendWebRtcRequest: function(request, uuid, destination) {
+  sendWebRtcRequest: function(request, uuid, destination, callback) {
     var self = this;
-    self.sendRequest( { webrtc: request }, uuid, destination);
+    self.sendRequest( { webrtc: request }, uuid, destination, callback);
   },
   sendWebRtcResponse: function(response, destination) {
     var self = this;
@@ -59,6 +60,7 @@ var RTC2SIP = RTC2SIP || {
       message = msg.registerResponse;
     }
     if (callback) {
+      delete self.requestCallbacks[uuid];
       callback(message);
     } else {
       console.log("no callback for " + JSON.stringify(msg));
@@ -104,6 +106,26 @@ var RTC2SIP = RTC2SIP || {
     } else if (msg.sessionMergeResult) {
       uuid = msg.sessionMergeResult.uuid;
       messageType = 'sessionMergeResult';
+    } else if (msg.conferenceCreateResponse) {
+      uuid = msg.conferenceCreateResponse.uuid;
+      messageType = 'conferenceCreateResponse';
+      callback = self.requestCallbacks[uuid];
+      if (callback) {
+        callback(msg.conferenceCreateResponse);
+        delete self.requestCallbacks[uuid];
+      }
+    } else if (msg.sessionConferenceJoin) {
+      uuid = msg.sessionConferenceJoin.uuid;
+      messageType = "sessionConferenceJoin";
+    } else if (msg.sessionConferenceLeave) {
+      uuid = msg.sessionConferenceLeave.uuid;
+      messageType = "sessionConferenceLeave";
+    } else if (msg.sessionConferenceJoinResponse) {
+      uuid = msg.sessionConferenceJoinResponse.uuid;
+      messageType = "sessionConferenceJoinResponse";
+    } else if (msg.sessionConferenceLeaveResponse) {
+      uuid = msg.sessionConferenceLeaveResponse.uuid;
+      messageType = "sessionConferenceLeaveResponse";
     }
     if (!uuid || !messageType) {
       console.log("no uuid " + uuid + " or messageType " + messageType);
@@ -111,12 +133,14 @@ var RTC2SIP = RTC2SIP || {
       return;
     }
     var call = self.calls[uuid];
-    console.log('< ' + messageType + ' uuid ' + uuid + ' call ' + call);
+    if (call) {
+      console.log('< ' + messageType + ' uuid ' + uuid + ' call ' + call);
+    }
     if (!call) {
       if (messageType === 'sessionOffer') {
         var failed = true;
         var activeCalls = Object.keys(self.calls).length;
-        if ((activeCalls == 0) || self.isCallWaitingEnabled || msg.sessionOffer.replacesUuid) {
+        if ((activeCalls == 0) || self.isCallWaitingEnabled || msg.sessionOffer.replacesUuid || !msg.sessionOffer.sip) {
           if (msg.sessionOffer.sip && msg.sessionOffer.sip.registrationId) {
             registrationId = msg.sessionOffer.sip.registrationId;
             if (registrationId) {
@@ -359,6 +383,22 @@ var RTC2SIP = RTC2SIP || {
       call.startCall();
     }
     return call;
+  },
+  conference: function(calls, localStream, remoteMedia, delegate) {
+    var self = this;
+    var conference = new AhoyConference({ calls: calls }, localStream, remoteMedia, self, delegate);
+    if (conference) {
+      conference.start();
+    }
+    return conference;
+  },
+  addConference: function(uuid, conference) {
+    var self = this;
+    self.conferences[uuid] = conference;
+  },
+  removeConference: function(uuid) {
+    var self = this;
+    delete self.conferences[uuid];
   },
   addCall: function(uuid, call) {
     var self = this;

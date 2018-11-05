@@ -4978,6 +4978,174 @@ module.exports = {
 },{}]},{},[3])(3)
 });
 
+function AhoyConference(options, localStream, remoteMedia, client, delegate) {
+  var self = this;
+  self.id = null;
+  self.pc = null;
+  self.pc_config = null;
+  self.turn = options.turn?options.turn:null;
+  self.calls = options.calls?options.calls:[];
+
+  self.localStream = localStream;
+  self.remoteStream = null;
+  self.remoteMedia = remoteMedia;
+  self.remoteDescription = null;
+  self.remoteIceCandidates = [];
+  self.client = client;
+  self.delegate = delegate;
+  self.uuid = client.generateUuid();
+  if (options.audioCodec) {
+    self.audioCodec = options.audioCodec.toLowerCase();
+  }  else {
+    self.audioCodec = null;
+  }
+}
+
+AhoyConference.prototype.start = function() {
+  var self = this;
+
+  if (self.turn && self.turn.urls) {
+    var iceServers = [];
+    self.turn.urls.forEach(function(url) {
+      iceServers.push( { url: url, urls: url, username: self.turn.username, credential: self.turn.credential} );
+    });
+    if (iceServers.length > 0) {
+      self.pc_config = {
+        "iceServers": iceServers
+      };
+    }
+  }
+  self.pc = new RTCPeerConnection(self.pc_config);
+  if (self.localStream) {
+    self.pc.addStream(self.localStream);
+  }
+
+  self.pc.oniceconnectionstatechange = function(event) {
+    var state = event;
+    if (event.target && event.target.iceConnectionState) {
+      state = event.target.iceConnectionState;
+    }
+  }
+
+  self.pc.onaddstream = function(event) {
+    self.remoteStream = event.stream;
+    self.remoteMedia.srcObject = self.remoteStream;
+  }
+  var sessions = [];
+  self.calls.forEach(function(call) {
+    if (!call.isAnswered) {
+      console.log('cannot add an unanswered call to a conference.');
+      return;
+    }
+    sessions.push(call.uuid);
+  });
+
+  self.pc.createOffer(
+    function createOfferSucces(description) {
+      if (self.audioCodec) {
+        description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
+      }
+      self.pc.setLocalDescription(
+        description,
+        function setLocalSuccess() {
+          self.localDescription = description;
+          var request = {
+            conferenceCreateRequest: {
+              sdp: self.localDescription.sdp,
+              sessions: sessions,
+              uuid: self.uuid
+            }
+          };
+          self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
+            if (response && response.success && response.sdp) {
+              self.id = response.conferenceId;
+              self.remoteDescription = new RTCSessionDescription({ type: "answer", sdp: response.sdp });
+
+              self.client.addConference(self.id, self);
+              self.pc.setRemoteDescription(
+                self.remoteDescription,
+                function setRemoteSuccess() {
+                  self.calls.forEach(function(call) {
+                    call.destroyPeerConnection(5000);
+                  });
+                },
+                function setRemoteError(error) {
+                  if (self.delegate.callFailed) {
+                    self.delegate.callFailed(self,error);
+                  }
+                }
+              );
+
+            }
+          });
+        },
+        function setLocalError(error) {
+          if (self.delegate.callFailed) {
+            self.delegate.callFailed(self, error);
+          }
+        }
+      );
+    },
+    function createOfferError(error) {
+      if (self.delegate.callFailed) {
+        self.delegate.callFailed(self, error);
+      }
+    },
+    self.constraints
+  );
+}
+
+AhoyConference.prototype.destroy = function(terminateSessions) {
+  var self = this;
+  self.uuid = self.client.generateUuid();
+  if (terminateSessions === undefined) {
+    terminateSessions = false;
+  }
+  var request = {
+    conferenceDestroyRequest: {
+      conferenceId: self.id,
+      terminateSessions: terminateSessions,
+      uuid: self.uuid
+    }
+  };
+  self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
+    console.log("conferenceDestroyResponse", response);
+  });
+}
+
+AhoyConference.prototype.add = function(call) {
+  var self = this;
+  if (!call.isAnswered) {
+    console.log('cannot add an unanswered call to a conference.');
+    return;
+  }
+  var request = {
+    sessionConferenceJoinRequest: {
+      conferenceId: self.id,
+      uuid: call.uuid
+    }
+  };
+  call.conference = self;
+  call.destroyPeerConnection(5000);
+  self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
+    console.log("sessionConferenceJoinResponse", response);
+  });
+}
+
+AhoyConference.prototype.remove = function(call) {
+  var self = this;
+  var request = {
+    sessionConferenceLeaveRequest: {
+      conferenceId: self.id,
+      uuid: call.uuid
+    }
+  };
+  call.conference = null;
+  self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
+    console.log("sessionConferenceLeaveResponse", response);
+  });
+}
+
 function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) {
   var self = this;
   self.pc = null;
@@ -4989,6 +5157,7 @@ function AhoySipCall(uuid, options, localStream, remoteMedia, client, delegate) 
   self.timeout = options.timeout;
   self.sip = options.sip?options.sip:{};
   self.data = options.data?options.data:null;
+  self.conference = null;
 
   self.localStream = localStream;
   self.remoteStream = null;
@@ -5030,16 +5199,25 @@ AhoySipCall.prototype.cloneInto = function(destination) {
   });
 }
 
-AhoySipCall.prototype.destroyPeerConnection = function() {
+AhoySipCall.prototype.destroyPeerConnection = function(timeout) {
   var self = this;
-  if (self.pc) {
-    self.pc.oniceconnectionstatechange = null;
+  var pc = self.pc;
+  if (!pc) return;
+
+  if (!timeout) timeout = 0;
+  try {
+    pc.oniceconnectionstatechange = null;
+    pc.removeStream(self.localStream);
+  } catch (ignored) {
+  }
+
+  setTimeout(function() {
     try {
-      self.pc.close();
+      pc.close();
     } catch (ignored) {
     }
-    self.pc = null;
-  }
+  }, timeout);
+  self.pc = null;
 }
 
 AhoySipCall.prototype.destroy = function() {
@@ -5297,10 +5475,19 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
           }
         );
       }
+    } else if (msg.sessionConferenceJoin) {
+      if (self.delegate.callJoinedConference) {
+        self.delegate.callJoinedConference(self, self.conference);
+      }
+    } else if (msg.sessionConferenceLeave) {
+      if (self.delegate.callLeftConference) {
+        self.delegate.callLeftConference(self, self.conference);
+      }
+      self.conference = null;
     } else if (msg.sessionAnswer) {
       if (self.isOnHold) return;
       
-      if (self.isResuming && msg.sessionAnswer.sdp) {
+      if (self.isResuming && msg.sessionAnswer.sdp && !self.isP2p) {
         self.isResuming = false;
         var offerAudioCodecs = AhoyParseAudioCodecs(self.localDescription.sdp);
         var answerAudioCodecs = AhoyParseAudioCodecs(msg.sessionAnswer.sdp);
@@ -5386,7 +5573,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
       }
     } else if (msg.sessionOffer) {
       if (msg.sessionOffer.sdp) {
-        self.destroyPeerConnection();
+        self.destroyPeerConnection(5000);
 	self.pc = new RTCPeerConnection(self.pc_config);
 	if (self.localStream) {
 	  self.pc.addStream(self.localStream);
@@ -5433,41 +5620,48 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
 
 AhoySipCall.prototype.sendSessionOffer = function() {
   var self = this;
-  var sip = {
-    calledPartyNumber: self.calledParty.number,
-    callingPartyNumber: self.callingParty.number,
-  };
-  if (self.callingParty.name !== undefined) {
-    sip.callingPartyName = self.callingParty.name;
-  }
-  if (self.sip.registrationId) {
-    sip.registrationId = self.sip.registrationId;
-  } else {
-    sip.hostname = self.sip.hostname;
-    sip.port = self.sip.port?self.sip.port:5060;
-    sip.username = self.sip.username;
-    sip.password = self.sip.password;
-    if (self.sip.proxyUrl !== undefined) {
-      sip.proxyUrl = self.sip.proxyUrl;
-    }
-  }
+
   var sdp = self.localDescription.sdp;
-  if (self.isOnHold) {
-   sdp = self.localDescription.sdp.replace('a=sendrecv', 'a=sendonly');
+  if (self.isOnHold && !self.isP2p) {
+   sdp = self.localDescription.sdp.replace(/a=sendrecv/g, 'a=sendonly');
   }
   var request = {
     sessionOffer: {
       sdp: sdp,
-      sip: sip,
       uuid: self.uuid
     }
-  };
+  }
+  if (!self.isP2p) {
+    var sip = {
+      calledPartyNumber: self.calledParty.number,
+      callingPartyNumber: self.callingParty.number,
+    };
+    if (self.callingParty.name !== undefined) {
+      sip.callingPartyName = self.callingParty.name;
+    }
+    if (self.sip.registrationId) {
+      sip.registrationId = self.sip.registrationId;
+    } else {
+      sip.hostname = self.sip.hostname;
+      sip.port = self.sip.port?self.sip.port:5060;
+      sip.username = self.sip.username;
+      sip.password = self.sip.password;
+      if (self.sip.proxyUrl !== undefined) {
+        sip.proxyUrl = self.sip.proxyUrl;
+      }
+    }
+    request.sessionOffer['sip'] = sip;
+  }
+  if (self.isOnhold) {
+    request.sessionOffer.inactive = true;
+  }
   if (self.data) {
     request.sessionOffer.data = self.data;
   }
   self.client.sendWebRtcRequest(request, self.uuid, self.peerAddress);
-  sip.password = null;
-  self.sip.password = null;
+  if (self.sip) {
+    self.sip.password = null;
+  }
 }
 
 AhoySipCall.prototype.sendSessionAnswer = function(candidates) {
@@ -5606,6 +5800,12 @@ AhoySipCall.prototype.terminate = function() {
     return self.reject();
   }
   self.client.sendWebRtcResponse(response, self.peerAddress);
+  if (self.conference) {
+    if (self.delegate.callLeftConference) {
+      self.delegate.callLeftConference(self, self.conference);
+    }
+    self.conference = null;
+  }
   if (self.delegate.callTerminated) {
     self.delegate.callTerminated(self);
     self.delegate.callTerminated = null;
@@ -5680,7 +5880,7 @@ AhoySipCall.prototype.directConnect = function(options, stream, remoteMedia, xAh
     return self.answer(options, stream, remoteMedia);
   }
   self.client.removeCall(self.uuid);
-  self.destroyPeerConnection();
+  self.destroyPeerConnection(5000);
   var peerUuid = tmp[0];
   self.peerAddress = tmp[1];
   self.uuid = self.client.generateUuid();
@@ -6030,7 +6230,7 @@ AhoySipCall.prototype.hold = function(callback) {
   var self = this;
 
   self.isOnHold = true;
-  self.destroyPeerConnection();
+  self.destroyPeerConnection(5000);
   self.sendSessionOffer();
   if (callback) callback();
 }
@@ -6039,7 +6239,7 @@ AhoySipCall.prototype.resume = function(callback) {
   var self = this;
   self.isOnHold = false;
   self.isResuming = true;
-  self.destroyPeerConnection();
+  self.destroyPeerConnection(5000);
 
   self.pc = new RTCPeerConnection(self.pc_config);
   if (self.localStream) {
@@ -6229,6 +6429,7 @@ var RTC2SIP = RTC2SIP || {
   requestCallbacks: {},
   sipRegistrations: {},
   calls: {},
+  conferences: {},
   turn: null,
   sendRequest: function(request, uuid, destination, requestCallback) {
     var self = this;
@@ -6241,9 +6442,9 @@ var RTC2SIP = RTC2SIP || {
     var self = this;
     self.sendRequest( { sip: request }, uuid, null, callback );
   },
-  sendWebRtcRequest: function(request, uuid, destination) {
+  sendWebRtcRequest: function(request, uuid, destination, callback) {
     var self = this;
-    self.sendRequest( { webrtc: request }, uuid, destination);
+    self.sendRequest( { webrtc: request }, uuid, destination, callback);
   },
   sendWebRtcResponse: function(response, destination) {
     var self = this;
@@ -6260,6 +6461,7 @@ var RTC2SIP = RTC2SIP || {
       message = msg.registerResponse;
     }
     if (callback) {
+      delete self.requestCallbacks[uuid];
       callback(message);
     } else {
       console.log("no callback for " + JSON.stringify(msg));
@@ -6305,6 +6507,26 @@ var RTC2SIP = RTC2SIP || {
     } else if (msg.sessionMergeResult) {
       uuid = msg.sessionMergeResult.uuid;
       messageType = 'sessionMergeResult';
+    } else if (msg.conferenceCreateResponse) {
+      uuid = msg.conferenceCreateResponse.uuid;
+      messageType = 'conferenceCreateResponse';
+      callback = self.requestCallbacks[uuid];
+      if (callback) {
+        callback(msg.conferenceCreateResponse);
+        delete self.requestCallbacks[uuid];
+      }
+    } else if (msg.sessionConferenceJoin) {
+      uuid = msg.sessionConferenceJoin.uuid;
+      messageType = "sessionConferenceJoin";
+    } else if (msg.sessionConferenceLeave) {
+      uuid = msg.sessionConferenceLeave.uuid;
+      messageType = "sessionConferenceLeave";
+    } else if (msg.sessionConferenceJoinResponse) {
+      uuid = msg.sessionConferenceJoinResponse.uuid;
+      messageType = "sessionConferenceJoinResponse";
+    } else if (msg.sessionConferenceLeaveResponse) {
+      uuid = msg.sessionConferenceLeaveResponse.uuid;
+      messageType = "sessionConferenceLeaveResponse";
     }
     if (!uuid || !messageType) {
       console.log("no uuid " + uuid + " or messageType " + messageType);
@@ -6312,12 +6534,14 @@ var RTC2SIP = RTC2SIP || {
       return;
     }
     var call = self.calls[uuid];
-    console.log('< ' + messageType + ' uuid ' + uuid + ' call ' + call);
+    if (call) {
+      console.log('< ' + messageType + ' uuid ' + uuid + ' call ' + call);
+    }
     if (!call) {
       if (messageType === 'sessionOffer') {
         var failed = true;
         var activeCalls = Object.keys(self.calls).length;
-        if ((activeCalls == 0) || self.isCallWaitingEnabled || msg.sessionOffer.replacesUuid) {
+        if ((activeCalls == 0) || self.isCallWaitingEnabled || msg.sessionOffer.replacesUuid || !msg.sessionOffer.sip) {
           if (msg.sessionOffer.sip && msg.sessionOffer.sip.registrationId) {
             registrationId = msg.sessionOffer.sip.registrationId;
             if (registrationId) {
@@ -6560,6 +6784,22 @@ var RTC2SIP = RTC2SIP || {
       call.startCall();
     }
     return call;
+  },
+  conference: function(calls, localStream, remoteMedia, delegate) {
+    var self = this;
+    var conference = new AhoyConference({ calls: calls }, localStream, remoteMedia, self, delegate);
+    if (conference) {
+      conference.start();
+    }
+    return conference;
+  },
+  addConference: function(uuid, conference) {
+    var self = this;
+    self.conferences[uuid] = conference;
+  },
+  removeConference: function(uuid) {
+    var self = this;
+    delete self.conferences[uuid];
   },
   addCall: function(uuid, call) {
     var self = this;
