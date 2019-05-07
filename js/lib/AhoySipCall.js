@@ -83,7 +83,7 @@ AhoySipCall.prototype.destroy = function() {
   self.uuid = null;
 }
 
-function AhoySdpForceAudioCodec(sdp, audioCodec) {
+function AhoySdpForceAudioCodec(sdp, audioCodec, stereo) {
     var lines = sdp.split('\r\n');
     var payloadType = null;
     var extraPayloadTypes = [];
@@ -146,7 +146,13 @@ function AhoySdpForceAudioCodec(sdp, audioCodec) {
               extraPayloadTypes.push(getPayloadType(line));
               output.push(line);
             }
-          } else if ((line.indexOf('a=fmtp:') !== -1) && (getPayloadType(line) !== payloadType) ) {
+          } else if (line.indexOf('a=fmtp:') !== -1) {
+            if (getPayloadType(line) === payloadType) {
+              if (stereo && (audioCodec.toLowerCase() === 'opus/48000/2')) {
+                line += ';stereo=1;sprop-stereo=1';
+              }
+              output.push(line);
+            }
           } else if ((line.indexOf('a=rtcp-fb:') !== -1) && (getPayloadType(line) !== payloadType) ) {
           } else {
             output.push(line);
@@ -270,7 +276,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
       }
     } else if (msg.sessionCancel) {
       if (self.delegate.callCanceled) {
-        self.delegate.callCanceled(self);
+        self.delegate.callCanceled(self, msg.sessionCancel.handledElsewhere?msg.sessionCancel.handledElsewhere:false);
       } else if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
         self.delegate.callTerminated = null;
@@ -328,6 +334,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
         );
       }
     } else if (msg.sessionConferenceJoin) {
+      self.isAnswered = true;
       if (self.delegate.callJoinedConference) {
         self.delegate.callJoinedConference(self, self.conference);
       }
@@ -620,11 +627,12 @@ AhoySipCall.prototype.acknowledge = function() {
   self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
-AhoySipCall.prototype.reject = function(reason) {
+AhoySipCall.prototype.reject = function(reason, destroySession) {
   var self = this;
   var response = {
     sessionReject: {
       reason: reason?reason:"busy",
+      destroySession: destroySession?destroySession:false,
       uuid: self.uuid
     }
   };

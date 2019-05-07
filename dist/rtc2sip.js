@@ -4985,6 +4985,7 @@ function AhoyConference(options, localStream, remoteMedia, client, delegate) {
   self.pc_config = null;
   self.turn = options.turn?options.turn:null;
   self.calls = options.calls?options.calls:[];
+  self.stereo = (options.stereo !== undefined)?options.stereo:false;
 
   self.localStream = localStream;
   self.remoteStream = null;
@@ -5033,10 +5034,7 @@ AhoyConference.prototype.start = function() {
   }
   var sessions = [];
   self.calls.forEach(function(call) {
-    if (!call.isAnswered) {
-      console.log('cannot add an unanswered call to a conference.');
-      return;
-    }
+    call.conference = self;
     sessions.push(call.uuid);
   });
 
@@ -5045,6 +5043,9 @@ AhoyConference.prototype.start = function() {
       if (self.audioCodec) {
         description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
       }
+      if (self.stereo) {
+        description.sdp = AhoySdpForceAudioCodec(description.sdp, 'opus/48000/2', true);
+      }
       self.pc.setLocalDescription(
         description,
         function setLocalSuccess() {
@@ -5052,6 +5053,7 @@ AhoyConference.prototype.start = function() {
           var request = {
             conferenceCreateRequest: {
               sdp: self.localDescription.sdp,
+              stereo: self.stereo,
               sessions: sessions,
               uuid: self.uuid
             }
@@ -5115,10 +5117,6 @@ AhoyConference.prototype.destroy = function(terminateSessions) {
 
 AhoyConference.prototype.add = function(call) {
   var self = this;
-  if (!call.isAnswered) {
-    console.log('cannot add an unanswered call to a conference.');
-    return;
-  }
   var request = {
     sessionConferenceJoinRequest: {
       conferenceId: self.id,
@@ -5143,6 +5141,32 @@ AhoyConference.prototype.remove = function(call) {
   call.conference = null;
   self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
     console.log("sessionConferenceLeaveResponse", response);
+  });
+}
+
+AhoyConference.prototype.initiate = function() {
+  var self = this;
+
+  var sessions = [];
+  self.calls.forEach(function(call) {
+    sessions.push(call.uuid);
+  });
+
+  var request = {
+    conferenceCreateRequest: {
+      sessions: sessions,
+      uuid: self.uuid
+    }
+  };
+
+  self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
+    if (response && response.success) {
+      self.id = response.conferenceId;
+      self.client.addConference(self.id, self);
+      self.calls.forEach(function(call) {
+        call.destroyPeerConnection(5000);
+      });
+    }
   });
 }
 
@@ -5231,7 +5255,7 @@ AhoySipCall.prototype.destroy = function() {
   self.uuid = null;
 }
 
-function AhoySdpForceAudioCodec(sdp, audioCodec) {
+function AhoySdpForceAudioCodec(sdp, audioCodec, stereo) {
     var lines = sdp.split('\r\n');
     var payloadType = null;
     var extraPayloadTypes = [];
@@ -5294,7 +5318,13 @@ function AhoySdpForceAudioCodec(sdp, audioCodec) {
               extraPayloadTypes.push(getPayloadType(line));
               output.push(line);
             }
-          } else if ((line.indexOf('a=fmtp:') !== -1) && (getPayloadType(line) !== payloadType) ) {
+          } else if (line.indexOf('a=fmtp:') !== -1) {
+            if (getPayloadType(line) === payloadType) {
+              if (stereo && (audioCodec.toLowerCase() === 'opus/48000/2')) {
+                line += ';stereo=1;sprop-stereo=1';
+              }
+              output.push(line);
+            }
           } else if ((line.indexOf('a=rtcp-fb:') !== -1) && (getPayloadType(line) !== payloadType) ) {
           } else {
             output.push(line);
@@ -5418,7 +5448,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
       }
     } else if (msg.sessionCancel) {
       if (self.delegate.callCanceled) {
-        self.delegate.callCanceled(self);
+        self.delegate.callCanceled(self, msg.sessionCancel.handledElsewhere?msg.sessionCancel.handledElsewhere:false);
       } else if (self.delegate.callTerminated) {
         self.delegate.callTerminated(self);
         self.delegate.callTerminated = null;
@@ -5476,6 +5506,7 @@ AhoySipCall.prototype.handleWebRtc = function(msg, from) {
         );
       }
     } else if (msg.sessionConferenceJoin) {
+      self.isAnswered = true;
       if (self.delegate.callJoinedConference) {
         self.delegate.callJoinedConference(self, self.conference);
       }
@@ -5768,11 +5799,12 @@ AhoySipCall.prototype.acknowledge = function() {
   self.client.sendWebRtcResponse(response, self.peerAddress);
 }
 
-AhoySipCall.prototype.reject = function(reason) {
+AhoySipCall.prototype.reject = function(reason, destroySession) {
   var self = this;
   var response = {
     sessionReject: {
       reason: reason?reason:"busy",
+      destroySession: destroySession?destroySession:false,
       uuid: self.uuid
     }
   };
@@ -6785,11 +6817,15 @@ var RTC2SIP = RTC2SIP || {
     }
     return call;
   },
-  conference: function(calls, localStream, remoteMedia, delegate) {
+  conference: function(calls, localStream, remoteMedia, stereo, delegate) {
     var self = this;
-    var conference = new AhoyConference({ calls: calls }, localStream, remoteMedia, self, delegate);
+    var conference = new AhoyConference({ calls: calls, stereo: stereo }, localStream, remoteMedia, self, delegate);
     if (conference) {
-      conference.start();
+      if (localStream && remoteMedia) {
+        conference.start();
+      } else {
+        conference.initiate();
+      }
     }
     return conference;
   },

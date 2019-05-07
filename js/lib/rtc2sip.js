@@ -384,11 +384,15 @@ var RTC2SIP = RTC2SIP || {
     }
     return call;
   },
-  conference: function(calls, localStream, remoteMedia, delegate) {
+  conference: function(calls, localStream, remoteMedia, stereo, delegate) {
     var self = this;
-    var conference = new AhoyConference({ calls: calls }, localStream, remoteMedia, self, delegate);
+    var conference = new AhoyConference({ calls: calls, stereo: stereo }, localStream, remoteMedia, self, delegate);
     if (conference) {
-      conference.start();
+      if (localStream && remoteMedia) {
+        conference.start();
+      } else {
+        conference.initiate();
+      }
     }
     return conference;
   },

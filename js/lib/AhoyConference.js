@@ -5,6 +5,7 @@ function AhoyConference(options, localStream, remoteMedia, client, delegate) {
   self.pc_config = null;
   self.turn = options.turn?options.turn:null;
   self.calls = options.calls?options.calls:[];
+  self.stereo = (options.stereo !== undefined)?options.stereo:false;
 
   self.localStream = localStream;
   self.remoteStream = null;
@@ -53,10 +54,7 @@ AhoyConference.prototype.start = function() {
   }
   var sessions = [];
   self.calls.forEach(function(call) {
-    if (!call.isAnswered) {
-      console.log('cannot add an unanswered call to a conference.');
-      return;
-    }
+    call.conference = self;
     sessions.push(call.uuid);
   });
 
@@ -65,6 +63,9 @@ AhoyConference.prototype.start = function() {
       if (self.audioCodec) {
         description.sdp = AhoySdpForceAudioCodec(description.sdp, self.audioCodec);
       }
+      if (self.stereo) {
+        description.sdp = AhoySdpForceAudioCodec(description.sdp, 'opus/48000/2', true);
+      }
       self.pc.setLocalDescription(
         description,
         function setLocalSuccess() {
@@ -72,6 +73,7 @@ AhoyConference.prototype.start = function() {
           var request = {
             conferenceCreateRequest: {
               sdp: self.localDescription.sdp,
+              stereo: self.stereo,
               sessions: sessions,
               uuid: self.uuid
             }
@@ -135,10 +137,6 @@ AhoyConference.prototype.destroy = function(terminateSessions) {
 
 AhoyConference.prototype.add = function(call) {
   var self = this;
-  if (!call.isAnswered) {
-    console.log('cannot add an unanswered call to a conference.');
-    return;
-  }
   var request = {
     sessionConferenceJoinRequest: {
       conferenceId: self.id,
@@ -163,5 +161,31 @@ AhoyConference.prototype.remove = function(call) {
   call.conference = null;
   self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
     console.log("sessionConferenceLeaveResponse", response);
+  });
+}
+
+AhoyConference.prototype.initiate = function() {
+  var self = this;
+
+  var sessions = [];
+  self.calls.forEach(function(call) {
+    sessions.push(call.uuid);
+  });
+
+  var request = {
+    conferenceCreateRequest: {
+      sessions: sessions,
+      uuid: self.uuid
+    }
+  };
+
+  self.client.sendWebRtcRequest(request, self.uuid, null, function(response) {
+    if (response && response.success) {
+      self.id = response.conferenceId;
+      self.client.addConference(self.id, self);
+      self.calls.forEach(function(call) {
+        call.destroyPeerConnection(5000);
+      });
+    }
   });
 }
